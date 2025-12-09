@@ -123,3 +123,75 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
         _ => None,
     }
 }
+
+/// Deserializes a single client command line into ClientMsg.
+/// Expected wire format:
+///   ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
+///   DEL <SYMBOL> <ABOVE|BELOW>
+pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let mut parts = line.split_whitespace();
+    let cmd = parts.next()?;
+
+    match cmd {
+        CMD_ADD => {
+            let symbol = parts.next()?.to_string();
+            let direction_str = parts.next()?;
+            let direction = AlertDirection::from_str(direction_str)?;
+            let threshold: f64 = parts.next()?.parse().ok()?;
+
+            Some(ClientMsg::AddAlert(AlertRequest {
+                symbol,
+                direction,
+                threshold,
+            }))
+        }
+
+        CMD_DEL => {
+            let symbol = parts.next()?.to_string();
+            let direction_str = parts.next()?;
+            let direction = AlertDirection::from_str(direction_str)?;
+
+            Some(ClientMsg::RemoveAlert { symbol, direction })
+        }
+
+        _ => None,
+    }
+}
+
+impl ServerMsg {
+    /// Serializes ServerMsg into wire format (newline-terminated).
+    /// Format:
+    ///   TRIGGER <SYMBOL> <DIR> <THRESHOLD> <CURRENT_PRICE>
+    ///   ERR <MESSAGE>
+    pub fn to_wire(&self) -> String {
+        match self {
+            ServerMsg::AlertTriggered {
+                symbol,
+                direction,
+                threshold,
+                current_price,
+            } => format!(
+                "{CMD_TRIGGER} {} {} {} {}\n",
+                symbol,
+                direction.as_str(),
+                threshold,
+                current_price.value
+            ),
+
+            ServerMsg::Error(msg) => {
+                format!("{CMD_ERR} {}\n", msg)
+            }
+        }
+    }
+}
+
+/// Helper for the server to quickly create an error message.
+pub fn wire_error(msg: impl Into<String>) -> String {
+    format!("{CMD_ERR} {}\n", msg.into())
+}
+
