@@ -10,6 +10,9 @@ use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use rust_huge_project::protocol::{
+    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
+};
 
 
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
@@ -101,7 +104,7 @@ async fn scrap_stocks(stock_map : MapLock) -> Result<(), reqwest::Error> {
             writer.extend(temp_map);
         }
 
-        tokio::time::sleep(Duration::from_mins(1)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 }
 

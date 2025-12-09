@@ -1,8 +1,9 @@
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
-mod protocol;
-use protocol::{parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg};
+use rust_huge_project::protocol::{
+    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
+};
 
 /// A minimal, text-based TCP client for iteration 1.
 /// It supports:
