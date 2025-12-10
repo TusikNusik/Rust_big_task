@@ -1,50 +1,49 @@
+use axum::Error;
+use axum::Json;
+use reqwest;
+use reqwest::header::ACCEPT;
+use reqwest::header::USER_AGENT;
+use rust_huge_project::protocol::Price;
+use rust_huge_project::protocol::parse_client_msg;
+use rust_huge_project::protocol::{
+    AlertDirection, AlertRequest, ClientMsg, ServerMsg, parse_server_msg,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
 use std::fs::read;
 use std::hash::Hash;
+use std::sync::Arc;
 use std::time::Duration;
-use axum::Error;
-use reqwest::header::USER_AGENT;
-use reqwest::header::ACCEPT;
-use axum::{Json};
-use reqwest;
-use rust_huge_project::protocol::Price;
 use tokio::io;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
-use std::sync::{Arc};
 use tokio::sync::RwLock;
-use std::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use rust_huge_project::protocol::parse_client_msg;
-use tokio::net::tcp::OwnedWriteHalf;
-use rust_huge_project::protocol::{
-    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
-};
-
 
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
 
 #[derive(Debug, Deserialize)]
 struct YahooResponse {
-    chart : Chart
+    chart: Chart,
 }
 
 #[derive(Debug, Deserialize)]
 struct Chart {
-    result : Vec<ChartResult>,
-    error : Option<serde_json::Value>
+    result: Vec<ChartResult>,
+    error: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChartResult {
-    meta : Meta,
+    meta: Meta,
     timestamp: Option<Vec<i64>>,
     //indicators: Indicators,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")] 
+#[serde(rename_all = "camelCase")]
 struct Meta {
     currency: String,
     symbol: String,
@@ -63,7 +62,7 @@ fn read_all_stocks() -> Vec<String> {
         .collect()
 }
 
-async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(), reqwest::Error> {
+async fn scrap_stocks(stock_map: MapLock, all_stocks: Vec<String>) -> Result<(), reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?;
@@ -77,8 +76,12 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
         for i in &all_stocks {
             let url = format!("{}{}", url_base, i);
 
-            let request = client.get(url)
-                .header(USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+            let request = client
+                .get(url)
+                .header(
+                    USER_AGENT,
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                )
                 .header(ACCEPT, "application/json")
                 .send()
                 .await;
@@ -87,30 +90,36 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
                 Ok(request) => {
                     let request_code = request.status();
                     if request.status().is_success() {
-                        let yahoo_response : Result<YahooResponse, _> = request.json().await;
+                        let yahoo_response: Result<YahooResponse, _> = request.json().await;
                         match yahoo_response {
                             Ok(yahoo_response) => {
                                 let yahoo_chart = yahoo_response.chart;
 
                                 if let Some(stock_data) = yahoo_chart.result.first() {
-                                    println!("Stock symbol and currency: {} {}", stock_data.meta.symbol, stock_data.meta.currency);
-                                    println!("Stock price {}", stock_data.meta.regular_market_price);
-                                    temp_map.insert(stock_data.meta.symbol.clone(), stock_data.meta.regular_market_price);
+                                    println!(
+                                        "Stock symbol and currency: {} {}",
+                                        stock_data.meta.symbol, stock_data.meta.currency
+                                    );
+                                    println!(
+                                        "Stock price {}",
+                                        stock_data.meta.regular_market_price
+                                    );
+                                    temp_map.insert(
+                                        stock_data.meta.symbol.clone(),
+                                        stock_data.meta.regular_market_price,
+                                    );
                                 }
                                 //println!("Response code : {}", request_code);
                             }
-                            Err(error) => println!("Fialed Json convertion: {}", error)
+                            Err(error) => println!("Fialed Json convertion: {}", error),
                         }
-                    }
-                    else {
+                    } else {
                         println!("Request not succesfull!");
                     }
                 }
-                Err(error) => println!("Network error: {}", error)
-
+                Err(error) => println!("Network error: {}", error),
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
-            
         }
 
         if temp_map.len() != 0 {
@@ -121,13 +130,17 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
 
         println!("[server] Completed scrapping all NASDAQ stocks, clients may join!");
 
-        tokio::time::sleep(Duration::from_mins(1)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 }
 
-async fn handle_client_requests(user_list : &HashMap<String, (AlertDirection , f64)>, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn handle_client_requests(
+    user_list: &HashMap<String, (AlertDirection, f64)>,
+    map_pointer: &MapLock,
+    write_socket: &mut OwnedWriteHalf,
+) -> io::Result<()> {
     let access = map_pointer.read().await;
-    
+
     for (stock, (direction, price)) in user_list {
         println!("{:?}", access);
         match access.get(stock) {
@@ -137,25 +150,32 @@ async fn handle_client_requests(user_list : &HashMap<String, (AlertDirection , f
                     AlertDirection::Below => *current_value < *price,
                 };
                 if triggered {
-                    let message = ServerMsg::AlertTriggered { symbol: stock.to_string(), direction: *direction, threshold: *price, current_price: Price { value: *current_value } }.to_wire();
+                    let message = ServerMsg::AlertTriggered {
+                        symbol: stock.to_string(),
+                        direction: *direction,
+                        threshold: *price,
+                        current_price: Price {
+                            value: *current_value,
+                        },
+                    }
+                    .to_wire();
                     write_socket.write_all(message.as_bytes()).await?;
                     write_socket.flush().await?;
                 }
-            },
-            None => println!("Stock not available!")
+            }
+            None => println!("Stock not available!"),
         }
-    } 
+    }
     Ok(())
-                
 }
 
-async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<()> {
+async fn handle_client(socket: TcpStream, map_pointer: MapLock) -> io::Result<()> {
     println!("[server] New client connected!");
     let (read_socket, mut write_socket) = socket.into_split();
 
     let mut buffered_reads = BufReader::new(read_socket).lines();
 
-    let mut user_list : HashMap<String, (AlertDirection , f64)>  = HashMap::new();
+    let mut user_list: HashMap<String, (AlertDirection, f64)> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -167,7 +187,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<
                                 println!("AlertRequest :  {:?}{}{}", alert.direction, alert.symbol, alert.threshold);
                                 user_list.insert(alert.symbol, (alert.direction, alert.threshold));
                                 handle_client_requests(&user_list, &map_pointer, &mut write_socket).await;
-                            },  
+                            },
                             Some(ClientMsg::RemoveAlert{symbol, direction}) => {
                                 println!("Remove Alert : {}{:?}", symbol, direction);
                                 if user_list.contains_key(&symbol) {
@@ -179,25 +199,22 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<
                     }
                     None => println!("[server] Failed to receive the message")
                 }
-            }   
+            }
 
-            _ = tokio::time::sleep(Duration::from_mins(1)) => {
+            _ = tokio::time::sleep(Duration::from_secs(60)) => {
                 println!("Checking if sending alert is possible!");
                 handle_client_requests(&user_list, &map_pointer, &mut write_socket).await;
             }
 
         }
-
     }
-
 }
 
 #[tokio::main]
 async fn main() -> Result<(), reqwest::Error> {
-
     let stock_symbols = read_all_stocks();
 
-    let stock_map : MapLock = Arc::new(RwLock::new(HashMap::new()));
+    let stock_map: MapLock = Arc::new(RwLock::new(HashMap::new()));
 
     let stock_map_clone = stock_map.clone();
     tokio::spawn(async move {
@@ -205,22 +222,27 @@ async fn main() -> Result<(), reqwest::Error> {
     });
 
     println!("Program uruchomiony. Naciśnij Ctrl+C aby zakończyć.");
-    
+
     let listener = TcpListener::bind("127.0.0.1:1234").await.unwrap();
 
-
     loop {
-        let (socket, _) = listener.accept().await.unwrap();
+    	tokio::select! {
+    		new = listener.accept() => {
+				let (socket, _) = new.unwrap();
 
-        let stock_map_client_clone = stock_map.clone();
+				let stock_map_client_clone = stock_map.clone();
 
-        tokio::spawn(async move {
-            handle_client(socket, stock_map_client_clone).await;
-        });
-
+				tokio::spawn(async move {
+					handle_client(socket, stock_map_client_clone).await;
+				});
+			}
+			
+			_ = tokio::signal::ctrl_c() => {
+				break;
+			}
+		}
     }
-    let _ = tokio::signal::ctrl_c().await; 
-
+    
     Ok(())
 }
 /*
@@ -238,4 +260,4 @@ async fn main() -> Result<(), reqwest::Error> {
 
 
 
-*/  
+*/

@@ -2,7 +2,7 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 use rust_huge_project::protocol::{
-    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
+    AlertDirection, AlertRequest, ClientMsg, ServerMsg, parse_server_msg,
 };
 
 #[tokio::main]
@@ -11,7 +11,7 @@ async fn main() -> io::Result<()> {
     let stream = TcpStream::connect(addr).await?;
     println!("[client] Connected to {addr}");
 
-    // We split the socket so we can listen for incoming alerts 
+    // We split the socket so we can listen for incoming alerts
     // and send user commands at the exact same time without locking issues.
     let (read_half, mut write_half) = stream.into_split();
     let mut server_lines = BufReader::new(read_half).lines();
