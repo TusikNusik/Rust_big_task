@@ -1,4 +1,7 @@
 use std::fmt;
+// Expected format:
+// ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
+// DEL <SYMBOL> <ABOVE|BELOW>
 
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
@@ -12,7 +15,6 @@ pub enum AlertDirection {
 }
 
 impl AlertDirection {
-    /// Wire serialization.
     pub fn as_str(&self) -> &'static str {
         match self {
             AlertDirection::Above => "ABOVE",
@@ -20,7 +22,6 @@ impl AlertDirection {
         }
     }
 
-    /// Wire deserialization.
     pub fn from_str(token: &str) -> Option<Self> {
         match token {
             "ABOVE" => Some(AlertDirection::Above),
@@ -37,23 +38,18 @@ pub struct AlertRequest {
     pub threshold: f64,
 }
 
-/// Client -> Server messages.
 #[derive(Debug, Clone)]
 pub enum ClientMsg {
-    /// Wire: ADD <SYMBOL> <DIR> <THRESHOLD>
     AddAlert(AlertRequest),
 
-    /// Wire: DEL <SYMBOL> <DIR>
     RemoveAlert {
         symbol: String,
         direction: AlertDirection,
     },
 }
 
-/// Server -> Client messages.
 #[derive(Debug, Clone)]
 pub enum ServerMsg {
-    /// Wire: TRIGGER <SYMBOL> <DIR> <THRESHOLD> <CURRENT_PRICE>
     AlertTriggered {
         symbol: String,
         direction: AlertDirection,
@@ -61,18 +57,15 @@ pub enum ServerMsg {
         current_price: Price,
     },
 
-    /// Wire: ERR <MESSAGE>
     Error(String),
 }
 
-// Wire protocol command tokens.
 pub const CMD_ADD: &str = "ADD";
 pub const CMD_DEL: &str = "DEL";
 pub const CMD_TRIGGER: &str = "TRIGGER";
 pub const CMD_ERR: &str = "ERR";
 
 impl ClientMsg {
-    /// Serializes message for TCP transmission (newline delimited).
     pub fn to_wire(&self) -> String {
         match self {
             ClientMsg::AddAlert(alert) => {
@@ -90,7 +83,6 @@ impl ClientMsg {
     }
 }
 
-/// Deserializes server messages.
 pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
     let line = line.trim();
     if line.is_empty() {
@@ -124,10 +116,6 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
     }
 }
 
-/// Deserializes a single client command line into ClientMsg.
-/// Expected wire format:
-///   ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
-///   DEL <SYMBOL> <ABOVE|BELOW>
 pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
     let line = line.trim();
     if line.is_empty() {
@@ -164,10 +152,6 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
 }
 
 impl ServerMsg {
-    /// Serializes ServerMsg into wire format (newline-terminated).
-    /// Format:
-    ///   TRIGGER <SYMBOL> <DIR> <THRESHOLD> <CURRENT_PRICE>
-    ///   ERR <MESSAGE>
     pub fn to_wire(&self) -> String {
         match self {
             ServerMsg::AlertTriggered {
@@ -190,8 +174,6 @@ impl ServerMsg {
     }
 }
 
-/// Helper for the server to quickly create an error message.
 pub fn wire_error(msg: impl Into<String>) -> String {
     format!("{CMD_ERR} {}\n", msg.into())
 }
-
