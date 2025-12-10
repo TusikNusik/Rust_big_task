@@ -64,11 +64,7 @@ async fn main() -> io::Result<()> {
                             }
                         }
                     }
-                                        
-                    tokio::signal::ctrl_c() => {
-						break;
-					}
-                    
+
                     None => {
                         println!("[client] stdin closed.");
                         break;

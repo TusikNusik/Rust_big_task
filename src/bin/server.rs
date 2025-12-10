@@ -113,7 +113,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
 
         println!("[server] Completed scrapping all NASDAQ stocks, clients may join!");
 
-        tokio::time::sleep(Duration::from_mins(1)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 }
 
@@ -200,7 +200,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) {
                     }
                 }
             }   
-            _ = tokio::time::sleep(Duration::from_mins(1)) => {
+            _ = tokio::time::sleep(Duration::from_secs(60)) => {
                 println!("[server] Sending alerts to client!");
                 if let Err(e) = handle_client_requests(&mut user_list, &map_pointer, &mut write_socket).await {
                     println!("[server] Network error: {}", e);
