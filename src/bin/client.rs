@@ -102,7 +102,7 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
         "add" => {
             let symbol = parts.next()?.to_string();
             let dir_str = parts.next()?;
-            let direction = AlertDirection::from_str(&dir_str.to_ascii_uppercase())?;
+            let direction = AlertDirection::as_msg(&dir_str.to_ascii_uppercase())?;
             let threshold: f64 = parts.next()?.parse().ok()?;
 
             Some(ClientMsg::AddAlert(AlertRequest {
@@ -115,7 +115,7 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
         "del" => {
             let symbol = parts.next()?.to_string();
             let dir_str = parts.next()?;
-            let direction = AlertDirection::from_str(&dir_str.to_ascii_uppercase())?;
+            let direction = AlertDirection::as_msg(&dir_str.to_ascii_uppercase())?;
 
             Some(ClientMsg::RemoveAlert { symbol, direction })
         }

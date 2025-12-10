@@ -25,7 +25,7 @@ impl AlertDirection {
         }
     }
 
-    pub fn from_str(token: &str) -> Option<Self> {
+    pub fn as_msg(token: &str) -> Option<Self> {
         match token {
             "ABOVE" => Some(AlertDirection::Above),
             "BELOW" => Some(AlertDirection::Below),
@@ -98,7 +98,7 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
     match cmd {
         CMD_TRIGGER => {
             let symbol = parts.next()?.to_string();
-            let direction = AlertDirection::from_str(parts.next()?)?;
+            let direction = AlertDirection::as_msg(parts.next()?)?;
             let threshold: f64 = parts.next()?.parse().ok()?;
             let current_value: f64 = parts.next()?.parse().ok()?;
 
@@ -132,7 +132,7 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
         CMD_ADD => {
             let symbol = parts.next()?.to_string();
             let direction_str = parts.next()?;
-            let direction = AlertDirection::from_str(direction_str)?;
+            let direction = AlertDirection::as_msg(direction_str)?;
             let threshold: f64 = parts.next()?.parse().ok()?;
 
             Some(ClientMsg::AddAlert(AlertRequest {
@@ -145,7 +145,7 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
         CMD_DEL => {
             let symbol = parts.next()?.to_string();
             let direction_str = parts.next()?;
-            let direction = AlertDirection::from_str(direction_str)?;
+            let direction = AlertDirection::as_msg(direction_str)?;
 
             Some(ClientMsg::RemoveAlert { symbol, direction })
         }
