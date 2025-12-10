@@ -6,15 +6,18 @@ use reqwest::header::USER_AGENT;
 use reqwest::header::ACCEPT;
 use axum::{Json};
 use reqwest;
+use rust_huge_project::protocol::Price;
 use tokio::io;
+use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc};
+use tokio::sync::RwLock;
 use std::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use rust_huge_project::protocol::parse_client_msg;
-
+use tokio::net::tcp::OwnedWriteHalf;
 use rust_huge_project::protocol::{
     parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
 };
@@ -50,23 +53,6 @@ struct Meta {
     regular_market_time: i64,
 }
 
-/* 
-#[derive(Debug, Deserialize)]
-struct Indicators {
-    quote: Vec<Quote>,
-}
-
-// Tablice z danymi historycznymi (do wykresu)
-#[derive(Debug, Deserialize)]
-struct Quote {
-    // Używamy Option<f64>, bo w JSONie mogą być "null" (np. przerwa w handlu)
-    open: Vec<Option<f64>>,
-    close: Vec<Option<f64>>,
-    high: Vec<Option<f64>>,
-    low: Vec<Option<f64>>,
-    volume: Vec<Option<i64>>, // Wolumen to zazwyczaj liczby całkowite
-}
-*/
 fn read_all_stocks() -> Vec<String> {
     let file = fs::read_to_string("stocks.txt").expect("Couldn't open a file");
 
@@ -111,7 +97,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
                                     println!("Stock price {}", stock_data.meta.regular_market_price);
                                     temp_map.insert(stock_data.meta.symbol.clone(), stock_data.meta.regular_market_price);
                                 }
-                                println!("Response code : {}", request_code);
+                                //println!("Response code : {}", request_code);
                             }
                             Err(error) => println!("Fialed Json convertion: {}", error)
                         }
@@ -123,24 +109,53 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
                 Err(error) => println!("Network error: {}", error)
 
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
             
         }
 
         if temp_map.len() != 0 {
-            let mut writer = stock_map.write().unwrap();
+            let mut writer = stock_map.write().await;
 
             writer.extend(temp_map);
         }
+
+        println!("[server] Completed scrapping all NASDAQ stocks, clients may join!");
 
         tokio::time::sleep(Duration::from_mins(1)).await;
     }
 }
 
+async fn handle_client_requests(user_list : &HashMap<String, (AlertDirection , f64)>, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+    let access = map_pointer.read().await;
+    
+    for (stock, (direction, price)) in user_list {
+        println!("{:?}", access);
+        match access.get(stock) {
+            Some(current_value) => {
+                let triggered = match direction {
+                    AlertDirection::Above => *current_value > *price,
+                    AlertDirection::Below => *current_value < *price,
+                };
+                if triggered {
+                    let message = ServerMsg::AlertTriggered { symbol: stock.to_string(), direction: *direction, threshold: *price, current_price: Price { value: *current_value } }.to_wire();
+                    write_socket.write_all(message.as_bytes()).await?;
+                    write_socket.flush().await?;
+                }
+            },
+            None => println!("Stock not available!")
+        }
+    } 
+    Ok(())
+                
+}
+
 async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<()> {
-    let (read_socket, mut write_socket) = io::split(socket);
+    println!("[server] New client connected!");
+    let (read_socket, mut write_socket) = socket.into_split();
 
     let mut buffered_reads = BufReader::new(read_socket).lines();
+
+    let mut user_list : HashMap<String, (AlertDirection , f64)>  = HashMap::new();
 
     loop {
         tokio::select! {
@@ -150,9 +165,14 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<
                         match parse_client_msg(&line) {
                             Some(ClientMsg::AddAlert(alert)) => {
                                 println!("AlertRequest :  {:?}{}{}", alert.direction, alert.symbol, alert.threshold);
+                                user_list.insert(alert.symbol, (alert.direction, alert.threshold));
+                                handle_client_requests(&user_list, &map_pointer, &mut write_socket).await;
                             },  
                             Some(ClientMsg::RemoveAlert{symbol, direction}) => {
                                 println!("Remove Alert : {}{:?}", symbol, direction);
+                                if user_list.contains_key(&symbol) {
+                                    user_list.remove(&symbol);
+                                }
                             },
                             None => println!("[server] Haven't reeceived a suitable command")
                         }
@@ -162,7 +182,8 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) -> io::Result<
             }   
 
             _ = tokio::time::sleep(Duration::from_mins(1)) => {
-                println!("Checking if sending alert is possible!")
+                println!("Checking if sending alert is possible!");
+                handle_client_requests(&user_list, &map_pointer, &mut write_socket).await;
             }
 
         }
