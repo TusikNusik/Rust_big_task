@@ -2,7 +2,7 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 use rust_huge_project::protocol::{
-    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
+    AlertDirection, AlertRequest, ClientMsg, ServerMsg, parse_server_msg,
 };
 
 #[tokio::main]
@@ -11,7 +11,7 @@ async fn main() -> io::Result<()> {
     let stream = TcpStream::connect(addr).await?;
     println!("[client] Connected to {addr}");
 
-    // We split the socket so we can listen for incoming alerts 
+    // We split the socket so we can listen for incoming alerts
     // and send user commands at the exact same time without locking issues.
     let (read_half, mut write_half) = stream.into_split();
     let mut server_lines = BufReader::new(read_half).lines();
@@ -43,11 +43,11 @@ async fn main() -> io::Result<()> {
                         if line.is_empty() {
                             continue;
                         }
-                        if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
-                            println!("[client] Bye.");
+                        if line.eq("quit") {
+                            println!("[client] Quitting");
                             break;
                         }
-                        if line.eq_ignore_ascii_case("help") {
+                        if line.eq("help") {
                             print_help();
                             continue;
                         }
@@ -64,10 +64,16 @@ async fn main() -> io::Result<()> {
                             }
                         }
                     }
+                                        
+                    tokio::signal::ctrl_c() => {
+						break;
+					}
+                    
                     None => {
                         println!("[client] stdin closed.");
                         break;
                     }
+
                 }
             }
         }
@@ -76,21 +82,22 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-/// Prints a short help for the user.
+// Prints a short help for the user.
 fn print_help() {
     println!("Commands:");
     println!("  add <SYMBOL> <ABOVE|BELOW> <THRESHOLD>");
+    println!("  del <SYMBOL> <ABOVE|BELOW>");
     println!("  help");
     println!("  quit");
     println!();
     println!("Examples:");
     println!("  add AAPL ABOVE 200");
     println!("  add TSLA BELOW 150");
-    println!("  del AAPL ABOVE 175");
+    println!("  del AAPL ABOVE");
     println!();
 }
 
-/// Parses a user command into a ClientMsg.
+// Parses a user command into a ClientMsg.
 fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
     let mut parts = line.split_whitespace();
     let cmd = parts.next()?.to_ascii_lowercase();

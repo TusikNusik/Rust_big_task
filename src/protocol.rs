@@ -1,7 +1,10 @@
-use std::fmt;
 // Expected format:
+
 // ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
 // DEL <SYMBOL> <ABOVE|BELOW>
+
+// TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
+// ERR <MESSAGE>
 
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
