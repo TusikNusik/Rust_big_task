@@ -14,3 +14,16 @@ Serwer oraz klient wymieniają komunikaty:
 Na razie można mieć **tylko jeden rodzaj alertu na każdą akcję**, czyli albo ABOVE albo BELOW, aczykolwiek zmienimy to w przyszłości.
 
 Serwer oraz klient korzystają z featerów biblioteki Tokio, oraz porozumiewają się za pomocą protokołów z pliku `protocol.rs`
+
+## Klient
+Klient łączy się z serwerem po TCP i umożliwia użytkownikowi dodawanie i usuwanie alertów cenowych z poziomu terminala. Po uruchomieniu próbuje połączyć się z serwerem, a następnie czeka na komendy wpisywane przez użytkownika. 
+
+Działa w pełni asynchronicznie dzięki bibliotece Tokio - jednocześnie obsługuje wejście użytkownika oraz wiadomości przychodzące z serwera. Po odebraniu komunikatu `TRIGGER ...` wypisuje informację o przekroczeniu progu cenowego.
+
+## Protocol
+Cały sposób komunikacji między klientem a serwerem znajduje się w pliku `protocol.rs`. Plik ten zawiera:
+
+- definicje wiadomości przesyłanych między stronami (`AddAlert`, `RemoveAlert`, `AlertTriggered`, `Error`),
+- funkcje parsujące przychodzące linie tekstu i funkcje zamieniające struktury Rust na komendy tekstowe.
+
+Komunikacja opiera się na prostych komendach tekstowych, z których każda kończy się znakiem nowej linii.
