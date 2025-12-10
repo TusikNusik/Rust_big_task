@@ -1,7 +1,6 @@
 use std::time::Duration;
 use reqwest::header::USER_AGENT;
 use reqwest::header::ACCEPT;
-use reqwest;
 use rust_huge_project::protocol::Price;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
@@ -14,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use rust_huge_project::protocol::parse_client_msg;
 use tokio::net::tcp::OwnedWriteHalf;
 use rust_huge_project::protocol::{
-    parse_server_msg, AlertDirection, AlertRequest, ClientMsg, ServerMsg,
+    AlertDirection, ClientMsg, ServerMsg,
 };
 
 
@@ -105,7 +104,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
             
         }
 
-        if temp_map.len() != 0 {
+        if !temp_map.is_empty() {
             let mut writer = stock_map.write().await;
 
             writer.extend(temp_map);
