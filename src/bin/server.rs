@@ -181,6 +181,18 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock) {
                                     user_list.remove(&symbol);
                                 }
                             },
+                            Some(ClientMsg::LoginClient { .. }) => {
+                                if let Err(e) = client_errors("LOGIN not supported on server.", &mut write_socket).await {
+                                    println!("[server] Network error: {}", e);
+                                    break;
+                                }
+                            }
+                            Some(ClientMsg::RegisterClient { .. }) => {
+                                if let Err(e) = client_errors("REGISTER not supported on server.", &mut write_socket).await {
+                                    println!("[server] Network error: {}", e);
+                                    break;
+                                }
+                            }
                             None => {
                                 if let Err(e) = client_errors("Wrong command!", &mut write_socket).await {
                                     println!("[server] Network error: {}", e);

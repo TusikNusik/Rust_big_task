@@ -6,8 +6,6 @@
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
 // ERR <MESSAGE>
 
-use std::fmt::format;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
     pub value: f64,
@@ -215,4 +213,49 @@ impl ServerMsg {
 
 pub fn wire_error(msg: impl Into<String>) -> String {
     format!("{CMD_ERR} {}\n", msg.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_to_wire() {
+        let msg = ClientMsg::LoginClient {
+            username: "alice".into(),
+            password: "secret".into(),
+        };
+        assert_eq!(msg.to_wire(), "LOGIN alice secret\n");
+    }
+
+    #[test]
+    fn register_to_wire() {
+        let msg = ClientMsg::RegisterClient {
+            username: "bob".into(),
+            password: "hunter2".into(),
+        };
+        assert_eq!(msg.to_wire(), "REGISTER bob hunter2\n");
+    }
+
+    #[test]
+    fn parse_login_msg() {
+        match parse_client_msg("LOGIN user pass") {
+            Some(ClientMsg::LoginClient { username, password }) => {
+                assert_eq!(username, "user");
+                assert_eq!(password, "pass");
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_register_msg() {
+        match parse_client_msg("REGISTER user pass") {
+            Some(ClientMsg::RegisterClient { username, password }) => {
+                assert_eq!(username, "user");
+                assert_eq!(password, "pass");
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
 }
