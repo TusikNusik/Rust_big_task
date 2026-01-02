@@ -6,6 +6,8 @@
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
 // ERR <MESSAGE>
 
+use std::fmt::format;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
     pub value: f64,
@@ -49,6 +51,16 @@ pub enum ClientMsg {
         symbol: String,
         direction: AlertDirection,
     },
+
+    RegisterClient {
+        username: String,
+        password: String,
+    },
+
+    LoginClient {
+        username: String,
+        password: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +79,8 @@ pub const CMD_ADD: &str = "ADD";
 pub const CMD_DEL: &str = "DEL";
 pub const CMD_TRIGGER: &str = "TRIGGER";
 pub const CMD_ERR: &str = "ERR";
+pub const CMD_LOGIN: &str = "LOGIN";
+pub const CMD_REGISTER: &str = "REGISTER";
 
 impl ClientMsg {
     pub fn to_wire(&self) -> String {
@@ -82,6 +96,13 @@ impl ClientMsg {
             ClientMsg::RemoveAlert { symbol, direction } => {
                 format!("{CMD_DEL} {} {}\n", symbol, direction.as_str())
             }
+            ClientMsg::LoginClient { username, password } => {
+                format!("{CMD_LOGIN} {} {}\n", username, password)
+            }
+            ClientMsg::RegisterClient { username, password } => {
+                format!("{CMD_REGISTER} {} {}\n", username, password)
+            }
+
         }
     }
 }
@@ -149,7 +170,22 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
 
             Some(ClientMsg::RemoveAlert { symbol, direction })
         }
+        
+        CMD_LOGIN => {
+            let username = parts.next()?.to_string();
+            let password = parts.next()?.to_string();
 
+            Some(ClientMsg::LoginClient { username, password })
+        },
+
+
+        CMD_REGISTER => {
+            let username = parts.next()?.to_string();
+            let password = parts.next()?.to_string();
+
+            Some(ClientMsg::RegisterClient { username, password })
+        },
+        
         _ => None,
     }
 }
