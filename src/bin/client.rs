@@ -120,6 +120,21 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
             Some(ClientMsg::RemoveAlert { symbol, direction })
         }
 
+        "login" => {
+            let username = parts.next()?.to_string();
+            let password = parts.next()?.to_string();
+           
+
+            Some(ClientMsg::LoginClient { username, password })
+        }
+
+        "register" => {
+            let username = parts.next()?.to_string();
+            let password = parts.next()?.to_string();
+
+            Some(ClientMsg::RegisterClient { username, password })
+        }
+
         _ => None,
     }
 }

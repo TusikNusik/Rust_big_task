@@ -201,7 +201,7 @@ async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLo
     let prices = map_lock.read().await;
 
     for alert in alerts.iter() {
-        if let Some(current_price) = prices.get(&alert.symbol) {
+        if let Some(current_price) = prices.get(&alert.symbol) {    
             let triggered = match alert.direction {
                 AlertDirection::Above => *current_price > alert.threshold,
                 AlertDirection::Below => *current_price < alert.threshold,
@@ -236,7 +236,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
             read_input = buffered_reads.next_line() => {
                 match read_input {
                     Ok(Some(line)) => {
-                        if let Some(id) = user_logged_in {
+                        if let Some(id) = user_logged_in  {
                             match parse_client_msg(&line) {
                                 Some(ClientMsg::AddAlert(alert)) => {
                                     println!("AlertRequest :  {:?}{}{}", alert.direction, alert.symbol, alert.threshold);
@@ -255,9 +255,32 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     }
                                 },
                                 Some(ClientMsg::LoginClient{username, password}) => {
+                                    if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
+                                        println!("[server] Network error: {}", z);
+                                    }          
+                                },
+                                Some(ClientMsg::RegisterClient{username, password}) => {
+                                    if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
+                                        println!("[server] Network error: {}", z);
+                                    }   
+                                },
+                                None => {
+                                    if let Err(e) = client_errors("Wrong command!", &mut write_socket).await {
+                                        println!("[server] Network error: {}", e);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        else {
+                            match parse_client_msg(&line) {
+                                Some(ClientMsg::LoginClient{username, password}) => {
                                     match database::login_user(&pool, &username, &password).await {
                                         Ok(id) => { // TODO: Wysylanie ServerMsg o udanym logowaniu.
                                             user_logged_in = Some(id);
+                                            if let Err(z) = client_errors("SUCCESFULLY Logged in!", &mut write_socket).await {
+                                                println!("[server] Network error: {}", z);
+                                            }
                                         },
                                         Err(e) => {
                                             if let Err(z) = client_errors("Failed to log-in!", &mut write_socket).await {
@@ -280,18 +303,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                         }
                                     }
                                 },
-                                None => {
-                                    if let Err(e) = client_errors("Wrong command!", &mut write_socket).await {
+                                _ => {
+                                      if let Err(e) = client_errors("User not logged in!", &mut write_socket).await {
                                         println!("[server] Network error: {}", e);
                                         break;
                                     }
                                 }
-                            }
-                        }
-                        else {
-                            if let Err(e) = client_errors("User not logged in!", &mut write_socket).await {
-                                println!("[server] Network error: {}", e);
-                                break;
                             }
                         }
                     }
