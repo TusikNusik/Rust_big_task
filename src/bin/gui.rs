@@ -227,6 +227,9 @@ struct App {
     username_input: String,
     password_input: String,
     command_kind: CommandKind,
+    auth_mode: AuthMode,
+    authenticated: bool,
+    auth_notice: Option<String>,
     alerts: Vec<AlertRow>,
     logs: Vec<LogRow>,
     max_logs: usize,
@@ -257,6 +260,10 @@ enum LogKind {
 enum CommandKind {
     AddAlert,
     RemoveAlert,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuthMode {
     Login,
     Register,
 }
@@ -276,6 +283,9 @@ impl App {
             username_input: "user".into(),
             password_input: "pass".into(),
             command_kind: CommandKind::AddAlert,
+            auth_mode: AuthMode::Login,
+            authenticated: false,
+            auth_notice: None,
             alerts: Vec::new(),
             logs: Vec::new(),
             max_logs: 500,
@@ -306,6 +316,8 @@ impl App {
                 ClientEvent::Disconnected { reason } => {
                     self.connected = false;
                     self.conn_status = format!("Disconnected: {reason}");
+                    self.authenticated = false;
+                    self.auth_notice = Some("Disconnected from server.".into());
                     self.push_log(LogKind::Error, format!("Disconnected: {reason}"));
                 }
                 ClientEvent::AlertTriggered { symbol, dir, threshold, current } => {
@@ -315,6 +327,15 @@ impl App {
                     );
                 }
                 ClientEvent::ServerError(msg) => {
+                    let msg_lower = msg.to_ascii_lowercase();
+                    if msg_lower.contains("logged in") && msg_lower.contains("succes") {
+                        self.authenticated = true;
+                        self.auth_notice = Some("Logged in successfully.".into());
+                    } else if msg_lower.contains("registered") && msg_lower.contains("succes") {
+                        self.auth_notice = Some("Registered successfully. You can log in now.".into());
+                    } else {
+                        self.auth_notice = Some(msg.clone());
+                    }
                     self.push_log(LogKind::Error, format!("[SERVER ERR] {msg}"));
                 }
                 ClientEvent::Log(s) => {
@@ -338,6 +359,188 @@ impl App {
 
     fn remove_local_alert(&mut self, symbol: &str, dir: AlertDirection) {
         self.alerts.retain(|row| !(row.symbol == symbol && row.dir == dir));
+    }
+
+    fn render_auth_screen(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Login / Register");
+
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.auth_mode, AuthMode::Login, "Login");
+            ui.selectable_value(&mut self.auth_mode, AuthMode::Register, "Register");
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Username:");
+            ui.text_edit_singleline(&mut self.username_input);
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Password:");
+            ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
+        });
+
+        ui.add_space(8.0);
+
+        let action_label = match self.auth_mode {
+            AuthMode::Login => "Login",
+            AuthMode::Register => "Register",
+        };
+        let auth_enabled = self.connected;
+        if ui.add_enabled(auth_enabled, egui::Button::new(action_label)).clicked() {
+            let username = self.username_input.trim().to_string();
+            let password = self.password_input.trim().to_string();
+            self.auth_notice = Some("Waiting for server response...".into());
+            match self.auth_mode {
+                AuthMode::Login => self.send(UiCommand::LoginClient { username, password }),
+                AuthMode::Register => self.send(UiCommand::RegisterClient { username, password }),
+            }
+        }
+
+        if let Some(msg) = &self.auth_notice {
+            ui.add_space(6.0);
+            ui.label(msg);
+        }
+
+        ui.add_space(16.0);
+        ui.small("You must be connected to log in or register.");
+    }
+
+    fn render_main_screen(&mut self, ui: &mut egui::Ui) {
+        ui.columns(2, |cols| {
+            cols[0].group(|ui| {
+                ui.heading("Command");
+
+                ui.horizontal(|ui| {
+                    ui.label("Command:");
+                    egui::ComboBox::from_id_source("cmd_combo")
+                        .selected_text(match self.command_kind {
+                            CommandKind::AddAlert => "ADD",
+                            CommandKind::RemoveAlert => "DEL",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.command_kind, CommandKind::AddAlert, "ADD");
+                            ui.selectable_value(&mut self.command_kind, CommandKind::RemoveAlert, "DEL");
+                        });
+                });
+
+                match self.command_kind {
+                    CommandKind::AddAlert => {
+                        ui.horizontal(|ui| {
+                            ui.label("Symbol:");
+                            ui.text_edit_singleline(&mut self.symbol_input);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Direction:");
+                            egui::ComboBox::from_id_source("dir_combo")
+                                .selected_text(match self.dir_input {
+                                    AlertDirection::Above => "ABOVE",
+                                    AlertDirection::Below => "BELOW",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
+                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
+                                });
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Threshold:");
+                            ui.text_edit_singleline(&mut self.threshold_input);
+                        });
+
+                        ui.add_space(8.0);
+
+                        let add_enabled = self.connected;
+                        if ui.add_enabled(add_enabled, egui::Button::new("Send")).clicked() {
+                            let symbol = self.normalize_symbol();
+                            let threshold = self.threshold_input.trim().parse::<f64>();
+                            match threshold {
+                                Ok(th) => {
+                                    self.alerts.push(AlertRow {
+                                        symbol: symbol.clone(),
+                                        dir: self.dir_input,
+                                        threshold: th,
+                                    });
+                                    self.send(UiCommand::AddAlert {
+                                        symbol,
+                                        dir: self.dir_input,
+                                        threshold: th,
+                                    });
+                                }
+                                Err(_) => {
+                                    self.push_log(LogKind::Error, "Invalid threshold (expected number).");
+                                }
+                            }
+                        }
+                    }
+                    CommandKind::RemoveAlert => {
+                        ui.horizontal(|ui| {
+                            ui.label("Symbol:");
+                            ui.text_edit_singleline(&mut self.symbol_input);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Direction:");
+                            egui::ComboBox::from_id_source("dir_combo")
+                                .selected_text(match self.dir_input {
+                                    AlertDirection::Above => "ABOVE",
+                                    AlertDirection::Below => "BELOW",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
+                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
+                                });
+                        });
+
+                        ui.add_space(8.0);
+
+                        let del_enabled = self.connected;
+                        if ui.add_enabled(del_enabled, egui::Button::new("Send")).clicked() {
+                            let symbol = self.normalize_symbol();
+                            self.send(UiCommand::RemoveAlert {
+                                symbol: symbol.clone(),
+                                dir: self.dir_input,
+                            });
+                            self.remove_local_alert(&symbol, self.dir_input);
+                        }
+                    }
+                }
+
+                ui.add_space(16.0);
+                ui.label("Notes:");
+                ui.small("You must be connected to send commands.");
+            });
+
+            cols[1].group(|ui| {
+                ui.heading("Active alerts");
+
+                if self.alerts.is_empty() {
+                    ui.label("No alerts added yet.");
+                } else {
+                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                        for (idx, a) in self.alerts.clone().into_iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{} {:?} {}", a.symbol, a.dir, a.threshold));
+
+                                let del_enabled = self.connected;
+                                if ui.add_enabled(del_enabled, egui::Button::new("Del")).clicked() {
+                                    self.send(UiCommand::RemoveAlert {
+                                        symbol: a.symbol.clone(),
+                                        dir: a.dir,
+                                    });
+                                    if idx < self.alerts.len() {
+                                        self.alerts.remove(idx);
+                                    }
+                                }
+                            });
+                            ui.separator();
+                        }
+                    });
+                }
+            });
+        });
     }
 }
 
@@ -369,183 +572,11 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.columns(2, |cols| {
-                cols[0].group(|ui| {
-                    ui.heading("Command");
-
-                    ui.horizontal(|ui| {
-                        ui.label("Command:");
-                        egui::ComboBox::from_id_source("cmd_combo")
-                            .selected_text(match self.command_kind {
-                                CommandKind::AddAlert => "ADD",
-                                CommandKind::RemoveAlert => "DEL",
-                                CommandKind::Login => "LOGIN",
-                                CommandKind::Register => "REGISTER",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.command_kind, CommandKind::AddAlert, "ADD");
-                                ui.selectable_value(&mut self.command_kind, CommandKind::RemoveAlert, "DEL");
-                                ui.selectable_value(&mut self.command_kind, CommandKind::Login, "LOGIN");
-                                ui.selectable_value(&mut self.command_kind, CommandKind::Register, "REGISTER");
-                            });
-                    });
-
-                    match self.command_kind {
-                        CommandKind::AddAlert => {
-                            ui.horizontal(|ui| {
-                                ui.label("Symbol:");
-                                ui.text_edit_singleline(&mut self.symbol_input);
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label("Direction:");
-                                egui::ComboBox::from_id_source("dir_combo")
-                                    .selected_text(match self.dir_input {
-                                        AlertDirection::Above => "ABOVE",
-                                        AlertDirection::Below => "BELOW",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
-                                        ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
-                                    });
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label("Threshold:");
-                                ui.text_edit_singleline(&mut self.threshold_input);
-                            });
-
-                            ui.add_space(8.0);
-
-                            let add_enabled = self.connected;
-                            if ui.add_enabled(add_enabled, egui::Button::new("Send")).clicked() {
-                                let symbol = self.normalize_symbol();
-                                let threshold = self.threshold_input.trim().parse::<f64>();
-                                match threshold {
-                                    Ok(th) => {
-                                        self.alerts.push(AlertRow {
-                                            symbol: symbol.clone(),
-                                            dir: self.dir_input,
-                                            threshold: th,
-                                        });
-                                        self.send(UiCommand::AddAlert {
-                                            symbol,
-                                            dir: self.dir_input,
-                                            threshold: th,
-                                        });
-                                    }
-                                    Err(_) => {
-                                        self.push_log(LogKind::Error, "Invalid threshold (expected number).");
-                                    }
-                                }
-                            }
-                        }
-                        CommandKind::RemoveAlert => {
-                            ui.horizontal(|ui| {
-                                ui.label("Symbol:");
-                                ui.text_edit_singleline(&mut self.symbol_input);
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label("Direction:");
-                                egui::ComboBox::from_id_source("dir_combo")
-                                    .selected_text(match self.dir_input {
-                                        AlertDirection::Above => "ABOVE",
-                                        AlertDirection::Below => "BELOW",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
-                                        ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
-                                    });
-                            });
-
-                            ui.add_space(8.0);
-
-                            let del_enabled = self.connected;
-                            if ui.add_enabled(del_enabled, egui::Button::new("Send")).clicked() {
-                                let symbol = self.normalize_symbol();
-                                self.send(UiCommand::RemoveAlert {
-                                    symbol: symbol.clone(),
-                                    dir: self.dir_input,
-                                });
-                                self.remove_local_alert(&symbol, self.dir_input);
-                            }
-                        }
-                        CommandKind::Login => {
-                            ui.horizontal(|ui| {
-                                ui.label("Username:");
-                                ui.text_edit_singleline(&mut self.username_input);
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label("Password:");
-                                ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
-                            });
-
-                            ui.add_space(8.0);
-
-                            let login_enabled = self.connected;
-                            if ui.add_enabled(login_enabled, egui::Button::new("Send")).clicked() {
-                                let username = self.username_input.trim().to_string();
-                                let password = self.password_input.trim().to_string();
-                                self.send(UiCommand::LoginClient { username, password });
-                            }
-                        }
-                        CommandKind::Register => {
-                            ui.horizontal(|ui| {
-                                ui.label("Username:");
-                                ui.text_edit_singleline(&mut self.username_input);
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label("Password:");
-                                ui.add(egui::TextEdit::singleline(&mut self.password_input).password(true));
-                            });
-
-                            ui.add_space(8.0);
-
-                            let reg_enabled = self.connected;
-                            if ui.add_enabled(reg_enabled, egui::Button::new("Send")).clicked() {
-                                let username = self.username_input.trim().to_string();
-                                let password = self.password_input.trim().to_string();
-                                self.send(UiCommand::RegisterClient { username, password });
-                            }
-                        }
-                    }
-
-                    ui.add_space(16.0);
-                    ui.label("Notes:");
-                    ui.small("You must be connected to send commands.");
-                });
-
-                cols[1].group(|ui| {
-                    ui.heading("Active alerts");
-
-                    if self.alerts.is_empty() {
-                        ui.label("No alerts added yet.");
-                    } else {
-                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                            for (idx, a) in self.alerts.clone().into_iter().enumerate() {
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{} {:?} {}", a.symbol, a.dir, a.threshold));
-
-                                    let del_enabled = self.connected;
-                                    if ui.add_enabled(del_enabled, egui::Button::new("Del")).clicked() {
-                                        self.send(UiCommand::RemoveAlert {
-                                            symbol: a.symbol.clone(),
-                                            dir: a.dir,
-                                        });
-                                        if idx < self.alerts.len() {
-                                            self.alerts.remove(idx);
-                                        }
-                                    }
-                                });
-                                ui.separator();
-                            }
-                        });
-                    }
-                });
-            });
+            if self.authenticated {
+                self.render_main_screen(ui);
+            } else {
+                self.render_auth_screen(ui);
+            }
 
             ui.add_space(10.0);
             ui.separator();
