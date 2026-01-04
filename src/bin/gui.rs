@@ -230,6 +230,8 @@ struct App {
     auth_mode: AuthMode,
     authenticated: bool,
     auth_notice: Option<String>,
+    alert_popup_open: bool,
+    alert_popup_message: Option<String>,
     alerts: Vec<AlertRow>,
     logs: Vec<LogRow>,
     max_logs: usize,
@@ -286,6 +288,8 @@ impl App {
             auth_mode: AuthMode::Login,
             authenticated: false,
             auth_notice: None,
+            alert_popup_open: false,
+            alert_popup_message: None,
             alerts: Vec::new(),
             logs: Vec::new(),
             max_logs: 500,
@@ -321,6 +325,12 @@ impl App {
                     self.push_log(LogKind::Error, format!("Disconnected: {reason}"));
                 }
                 ClientEvent::AlertTriggered { symbol, dir, threshold, current } => {
+                    let popup_msg = format!(
+                        "Alert for {symbol}: {:?} threshold={threshold}, current={current}",
+                        dir
+                    );
+                    self.alert_popup_message = Some(popup_msg);
+                    self.alert_popup_open = true;
                     self.push_log(
                         LogKind::Alert,
                         format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
@@ -600,6 +610,33 @@ impl eframe::App for App {
                 }
             });
         });
+
+        if self.alert_popup_open {
+            let mut open = self.alert_popup_open;
+            let mut should_close = false;
+            egui::Window::new("Alert")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    if let Some(msg) = &self.alert_popup_message {
+                        ui.label(msg);
+                    } else {
+                        ui.label("Alert triggered.");
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("OK").clicked() {
+                        should_close = true;
+                    }
+                });
+            if should_close {
+                open = false;
+            }
+            self.alert_popup_open = open;
+            if !self.alert_popup_open {
+                self.alert_popup_message = None;
+            }
+        }
 
         ctx.request_repaint_after(Duration::from_millis(50));
     }
