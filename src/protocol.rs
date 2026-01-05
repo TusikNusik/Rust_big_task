@@ -6,6 +6,8 @@
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
 // ERR <MESSAGE>
 
+use std::collections::btree_set::SymmetricDifference;
+
 use axum::serve::Serve;
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +66,16 @@ pub enum ClientMsg {
 
     CheckPrice {
         symbol: String,
+    },
+
+    BuyStock {
+        symbol: String,
+        quantity: i32,
+    },
+
+    SellStock {
+        symbol: String,
+        quantity: i32,
     }
 }
 
@@ -81,6 +93,16 @@ pub enum ServerMsg {
         price: f64,
     },
 
+    StockBought {
+        symbol: String,
+        quantity: i32,
+    },
+
+    StockSold {
+        symbol: String,
+        quantity: i32,
+    },
+
     Error(String),
 }
 
@@ -91,6 +113,10 @@ pub const CMD_ERR: &str = "ERR";
 pub const CMD_LOGIN: &str = "LOGIN";
 pub const CMD_REGISTER: &str = "REGISTER";
 pub const CMD_PRICE: &str = "PRICE";
+pub const CMD_BUY: &str = "BUY";
+pub const CMD_SELL: &str = "SELL";
+pub const CMD_BOUGHT: &str = "BOUGHT";
+pub const CMD_SOLD: &str = "SOLD";
 
 impl ClientMsg {
     pub fn to_wire(&self) -> String {
@@ -115,7 +141,12 @@ impl ClientMsg {
             ClientMsg::CheckPrice { symbol } => {
                 format!("{CMD_PRICE} {}\n", symbol)
             }
-
+            ClientMsg::BuyStock { symbol, quantity } => {
+                format!("{CMD_BUY} {} {}\n", symbol, quantity)
+            }
+            ClientMsg::SellStock { symbol, quantity } => {
+                format!("{CMD_BUY} {} {}\n", symbol, quantity)
+            }
         }
     }
 }
@@ -212,7 +243,21 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
 
             Some(ClientMsg::CheckPrice { symbol })
         },
+
+        CMD_BUY => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+
+            Some(ClientMsg::BuyStock { symbol, quantity })
+        },
         
+        CMD_SELL => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+
+            Some(ClientMsg::SellStock { symbol, quantity })
+        },
+
         _ => None,
     }
 }
@@ -234,6 +279,10 @@ impl ServerMsg {
             ),
 
             ServerMsg::PriceChecked { symbol, price } => format!("{CMD_PRICE} {} {}\n", symbol, price),
+
+            ServerMsg::StockBought { symbol, quantity } => format!("{CMD_BOUGHT} {} {}\n", symbol, quantity),
+
+            ServerMsg::StockSold { symbol, quantity } => format!("{CMD_SOLD} {} {}\n", symbol, quantity),
 
             ServerMsg::Error(msg) => {
                 format!("{CMD_ERR} {}\n", msg)
