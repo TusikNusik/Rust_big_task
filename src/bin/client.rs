@@ -152,7 +152,12 @@ fn handle_server_line(line: &str) {
                 direction, threshold, current_price.value
             );
         }
-
+        Some(ServerMsg::PriceChecked{symbol, price}) => {
+            println!(
+                "[PRICE INFO] {symbol} price={}",
+                price
+            );
+        }
         Some(ServerMsg::Error(msg)) => {
             println!("[SERVER ERROR] {msg}");
         }

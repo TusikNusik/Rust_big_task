@@ -36,6 +36,7 @@ enum ClientEvent {
     Disconnected { reason: String },
     AlertTriggered { symbol: String, dir: AlertDirection, threshold: f64, current: f64 },
     ServerError(String),
+    PriceChecked { symbol: String, price: f64},
     Log(String),
 }
 
@@ -206,6 +207,9 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
                 current: current_price.value,
             });
         }
+        Some(ServerMsg::PriceChecked{ symbol, price}) => {
+            let _ = ev_tx.send(ClientEvent::PriceChecked { symbol, price });
+        }
         Some(ServerMsg::Error(msg)) => {
             let _ = ev_tx.send(ClientEvent::ServerError(msg));
         }
@@ -335,6 +339,9 @@ impl App {
                         LogKind::Alert,
                         format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
                     );
+                }
+                ClientEvent::PriceChecked { symbol, price } => {
+                    
                 }
                 ClientEvent::ServerError(msg) => {
                     let msg_lower = msg.to_ascii_lowercase();

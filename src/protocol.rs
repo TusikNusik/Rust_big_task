@@ -6,6 +6,8 @@
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
 // ERR <MESSAGE>
 
+use axum::serve::Serve;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
     pub value: f64,
@@ -59,6 +61,10 @@ pub enum ClientMsg {
         username: String,
         password: String,
     },
+
+    CheckPrice {
+        symbol: String,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +76,11 @@ pub enum ServerMsg {
         current_price: Price,
     },
 
+    PriceChecked {
+        symbol: String,
+        price: f64,
+    },
+
     Error(String),
 }
 
@@ -79,6 +90,7 @@ pub const CMD_TRIGGER: &str = "TRIGGER";
 pub const CMD_ERR: &str = "ERR";
 pub const CMD_LOGIN: &str = "LOGIN";
 pub const CMD_REGISTER: &str = "REGISTER";
+pub const CMD_PRICE: &str = "PRICE";
 
 impl ClientMsg {
     pub fn to_wire(&self) -> String {
@@ -99,6 +111,9 @@ impl ClientMsg {
             }
             ClientMsg::RegisterClient { username, password } => {
                 format!("{CMD_REGISTER} {} {}\n", username, password)
+            }
+            ClientMsg::CheckPrice { symbol } => {
+                format!("{CMD_PRICE} {}\n", symbol)
             }
 
         }
@@ -130,6 +145,14 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
                 },
             })
         }
+
+        CMD_PRICE => {
+            let symbol = parts.next()?.to_string();
+            let price: f64 = parts.next()?.parse().ok()?;
+
+            Some(ServerMsg::PriceChecked { symbol, price })
+        }
+
         CMD_ERR => {
             let rest = parts.collect::<Vec<_>>().join(" ");
             Some(ServerMsg::Error(rest))
@@ -183,6 +206,12 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
 
             Some(ClientMsg::RegisterClient { username, password })
         },
+
+        CMD_PRICE => {
+            let symbol = parts.next()?.to_string();
+
+            Some(ClientMsg::CheckPrice { symbol })
+        },
         
         _ => None,
     }
@@ -203,6 +232,8 @@ impl ServerMsg {
                 threshold,
                 current_price.value
             ),
+
+            ServerMsg::PriceChecked { symbol, price } => format!("{CMD_PRICE} {} {}\n", symbol, price),
 
             ServerMsg::Error(msg) => {
                 format!("{CMD_ERR} {}\n", msg)

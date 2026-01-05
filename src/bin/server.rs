@@ -127,32 +127,21 @@ async fn client_errors(error_message : &str, write_socket :&mut OwnedWriteHalf) 
     Ok(())
 }
 
-async fn handle_client_requests(user_list : &mut HashMap<String, (AlertDirection , f64)>, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn check_price(stock : &str, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
     let access = map_pointer.read().await;
     
-    let mut invlid_stock : (String, bool) = (String::new(), false);
-    for (stock, (direction, price)) in user_list.iter() {
-        match access.get(stock) {
-            Some(current_value) => {
-                let triggered = match direction {
-                    AlertDirection::Above => *current_value > *price,
-                    AlertDirection::Below => *current_value < *price,
-                };
-                if triggered {
-                    let message = ServerMsg::AlertTriggered { symbol: stock.to_string(), direction: *direction, threshold: *price, current_price: Price { value: *current_value } }.to_wire();
-                    write_socket.write_all(message.as_bytes()).await?;
-                    write_socket.flush().await?;
-                }
-            },
-            None => {
-                client_errors("Stock not available!", write_socket).await?;
-                invlid_stock.0 = stock.clone();
-                invlid_stock.1 = true;
-            }
+    match access.get(stock) {
+        Some(current_value) => {
+            let message = ServerMsg::PriceChecked { symbol: stock.to_string(), price: *current_value}.to_wire();
+            write_socket.write_all(message.as_bytes()).await?;
+            write_socket.flush().await?;
+            
+        },
+        None => {
+            client_errors("Stock not available!", write_socket).await?;
         }
     }
-
-    user_list.remove(&invlid_stock.0); 
+    
     Ok(())
                 
 }
@@ -261,6 +250,11 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                 },
                                 Some(ClientMsg::RegisterClient{username, password}) => {
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
+                                        println!("[server] Network error: {}", z);
+                                    }   
+                                },
+                                Some(ClientMsg::CheckPrice{symbol}) => {
+                                    if let Err(z) = check_price(&symbol, &map_pointer, &mut write_socket).await {
                                         println!("[server] Network error: {}", z);
                                     }   
                                 },
