@@ -158,6 +158,12 @@ fn handle_server_line(line: &str) {
                 price
             );
         }
+        Some(ServerMsg::AlertAdded { symbol, direction, threshold }) => {
+            println!(
+                "[ALERT ADDED] {symbol} {:?} threshold={}",
+                direction, threshold
+            );
+        }
         Some(ServerMsg::Error(msg)) => {
             println!("[SERVER ERROR] {msg}");
         }

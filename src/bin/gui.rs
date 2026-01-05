@@ -35,6 +35,7 @@ enum ClientEvent {
     Connected,
     Disconnected { reason: String },
     AlertTriggered { symbol: String, dir: AlertDirection, threshold: f64, current: f64 },
+    AlertAdded { symbol: String, dir: AlertDirection, threshold: f64 },
     ServerError(String),
     PriceChecked { symbol: String, price: f64},
     Log(String),
@@ -207,6 +208,21 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
                 current: current_price.value,
             });
         }
+        Some(ServerMsg::AlertAdded { symbol, direction, threshold }) => {
+            let _ = ev_tx.send(ClientEvent::AlertAdded {
+                symbol,
+                dir: direction,
+                threshold,
+            });
+        }
+        Some(ServerMsg::StockBought { symbol, quantity }) => {
+            let msg = format!("Bought {quantity}x {symbol}");
+            let _ = ev_tx.send(ClientEvent::Log(msg));
+        }
+        Some(ServerMsg::StockSold { symbol, quantity }) => {
+            let msg = format!("Sold {quantity}x {symbol}");
+            let _ = ev_tx.send(ClientEvent::Log(msg));
+        }
         Some(ServerMsg::PriceChecked{ symbol, price}) => {
             let _ = ev_tx.send(ClientEvent::PriceChecked { symbol, price });
         }
@@ -236,6 +252,7 @@ struct App {
     auth_notice: Option<String>,
     alert_popup_open: bool,
     alert_popup_message: Option<String>,
+    alert_popup_data: Option<AlertRow>,
     alerts: Vec<AlertRow>,
     logs: Vec<LogRow>,
     max_logs: usize,
@@ -294,6 +311,7 @@ impl App {
             auth_notice: None,
             alert_popup_open: false,
             alert_popup_message: None,
+            alert_popup_data: None,
             alerts: Vec::new(),
             logs: Vec::new(),
             max_logs: 500,
@@ -329,20 +347,33 @@ impl App {
                     self.push_log(LogKind::Error, format!("Disconnected: {reason}"));
                 }
                 ClientEvent::AlertTriggered { symbol, dir, threshold, current } => {
-                    let popup_msg = format!(
-                        "Alert for {symbol}: {:?} threshold={threshold}, current={current}",
-                        dir
-                    );
-                    self.alert_popup_message = Some(popup_msg);
-                    self.alert_popup_open = true;
                     self.push_log(
                         LogKind::Alert,
                         format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
                     );
                 }
-                ClientEvent::PriceChecked { symbol, price } => {
-                    
+                ClientEvent::AlertAdded { symbol, dir, threshold } => {
+                    let popup_msg = format!("Alert added: {symbol} {:?} threshold={threshold}", dir);
+                    if !self.alerts.iter().any(|a| a.symbol == symbol && a.dir == dir && a.threshold == threshold) {
+                        self.alerts.push(AlertRow {
+                            symbol: symbol.clone(),
+                            dir,
+                            threshold,
+                        });
+                    }
+                    self.alert_popup_message = Some(popup_msg);
+                    self.alert_popup_data = Some(AlertRow {
+                        symbol: symbol.clone(),
+                        dir,
+                        threshold,
+                    });
+                    self.alert_popup_open = true;
+                    self.push_log(
+                        LogKind::Info,
+                        format!("Alert added: {symbol} {:?} threshold={threshold}", dir),
+                    );
                 }
+                ClientEvent::PriceChecked { symbol: _, price: _ } => {}
                 ClientEvent::ServerError(msg) => {
                     let msg_lower = msg.to_ascii_lowercase();
                     if msg_lower.contains("logged in") && msg_lower.contains("succes") {
@@ -475,11 +506,10 @@ impl App {
                             let threshold = self.threshold_input.trim().parse::<f64>();
                             match threshold {
                                 Ok(th) => {
-                                    self.alerts.push(AlertRow {
-                                        symbol: symbol.clone(),
-                                        dir: self.dir_input,
-                                        threshold: th,
-                                    });
+                                    if self.alerts.iter().any(|a| a.symbol == symbol && a.dir == self.dir_input && a.threshold == th) {
+                                        self.push_log(LogKind::Error, "Alert already exists.");
+                                        return;
+                                    }
                                     self.send(UiCommand::AddAlert {
                                         symbol,
                                         dir: self.dir_input,
@@ -629,12 +659,25 @@ impl eframe::App for App {
                     if let Some(msg) = &self.alert_popup_message {
                         ui.label(msg);
                     } else {
-                        ui.label("Alert triggered.");
+                        ui.label("Alert added.");
                     }
+                    ui.label("You can remove this alert if you no longer want it, or keep it.");
                     ui.add_space(8.0);
-                    if ui.button("OK").clicked() {
-                        should_close = true;
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Remove alert").clicked() {
+                            if let Some(alert) = self.alert_popup_data.clone() {
+                                self.send(UiCommand::RemoveAlert {
+                                    symbol: alert.symbol.clone(),
+                                    dir: alert.dir,
+                                });
+                                self.remove_local_alert(&alert.symbol, alert.dir);
+                            }
+                            should_close = true;
+                        }
+                        if ui.button("Keep alert").clicked() {
+                            should_close = true;
+                        }
+                    });
                 });
             if should_close {
                 open = false;
@@ -642,6 +685,7 @@ impl eframe::App for App {
             self.alert_popup_open = open;
             if !self.alert_popup_open {
                 self.alert_popup_message = None;
+                self.alert_popup_data = None;
             }
         }
 

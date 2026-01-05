@@ -46,6 +46,19 @@ pub async fn add_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertR
         return Err("Alert already exists".to_string());
     }
 
+    let existing = sqlx::query("SELECT 1 FROM alerts WHERE user_id = ? AND symbol = ? AND direction = ? AND threshold = ? LIMIT 1")
+        .bind(user_id)
+        .bind(&alert.symbol)
+        .bind(dir_str)
+        .bind(alert.threshold)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("DB Error: {}", e))?;
+
+    if existing.is_some() {
+        return Err("Alert already exists".to_string());
+    }
+
     sqlx::query("INSERT INTO alerts (user_id, symbol, direction, threshold) VALUES (?, ?, ?, ?)")
         .bind(user_id)
         .bind(&alert.symbol)

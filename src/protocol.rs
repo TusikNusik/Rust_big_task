@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
+// ALERTADDED <SYMBOL> <DIRECTION> <THRESHOLD>
 // ERR <MESSAGE>
 use crate::database::{PortfolioStock, StoredAlert};
 
@@ -88,6 +89,11 @@ pub enum ServerMsg {
         threshold: f64,
         current_price: Price,
     },
+    AlertAdded {
+        symbol: String,
+        direction: AlertDirection,
+        threshold: f64,
+    },
 
     PriceChecked {
         symbol: String,
@@ -115,6 +121,7 @@ pub enum ServerMsg {
 pub const CMD_ADD: &str = "ADD";
 pub const CMD_DEL: &str = "DEL";
 pub const CMD_TRIGGER: &str = "TRIGGER";
+pub const CMD_ALERT_ADDED: &str = "ALERTADDED";
 pub const CMD_ERR: &str = "ERR";
 pub const CMD_LOGIN: &str = "LOGIN";
 pub const CMD_REGISTER: &str = "REGISTER";
@@ -184,6 +191,17 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
                 current_price: Price {
                     value: current_value,
                 },
+            })
+        }
+        CMD_ALERT_ADDED => {
+            let symbol = parts.next()?.to_string();
+            let direction = AlertDirection::as_msg(parts.next()?)?;
+            let threshold: f64 = parts.next()?.parse().ok()?;
+
+            Some(ServerMsg::AlertAdded {
+                symbol,
+                direction,
+                threshold,
             })
         }
 
@@ -308,6 +326,16 @@ impl ServerMsg {
                 threshold,
                 current_price.value
             ),
+            ServerMsg::AlertAdded {
+                symbol,
+                direction,
+                threshold,
+            } => format!(
+                "{CMD_ALERT_ADDED} {} {} {}\n",
+                symbol,
+                direction.as_str(),
+                threshold
+            ),
 
             ServerMsg::PriceChecked { symbol, price } => format!("{CMD_PRICE} {} {}\n", symbol, price),
 
@@ -380,4 +408,5 @@ mod tests {
             other => panic!("unexpected parse result: {:?}", other),
         }
     }
+
 }
