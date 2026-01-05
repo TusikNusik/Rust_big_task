@@ -176,6 +176,18 @@ async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &Al
     Ok(())
 }
 
+async fn check_price_of_stock(map_pointer: &MapLock, stock: &str) -> Option<f64>{
+    let access = map_pointer.read().await;
+
+    access.get(stock).copied()
+}
+
+async fn send_data(message: String, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+    write_socket.write_all(message.as_bytes()).await?;
+    write_socket.flush().await?;
+
+    Ok(())
+}
 
 async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
 
@@ -257,6 +269,61 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     if let Err(z) = check_price(&symbol, &map_pointer, &mut write_socket).await {
                                         println!("[server] Network error: {}", z);
                                     }   
+                                },
+                                Some(ClientMsg::SellStock{symbol, quantity}) => {
+                                    if let Err(e) = database::sell_stock(&pool, id, &symbol, quantity).await {
+                                        // 1. Nie udalo sie Sprzedac akcji.
+                                        println!("[server-databese] Database error! {}", e);
+                                        if let Err(z) = client_errors(&e, &mut write_socket).await {
+                                            println!("[server] Network error: {}", z);
+                                        }   
+                                    }
+                                    // Udalo sie wysłac -> servermsg.
+                                    let message = ServerMsg::StockSold { symbol, quantity }.to_wire();
+                                    if let Err(e) = send_data(message, &mut write_socket).await {
+                                        println!("[server] Network error: {}", e);
+                                    }
+
+                                },
+                                Some(ClientMsg::BuyStock{symbol, quantity}) => {
+                                    if let Some(price) = check_price_of_stock(&map_pointer, &symbol).await {
+                                        if let Err(e) = database::buy_stock(&pool, id, &symbol, quantity, price).await {
+                                            // 1. Nie udalo sie kupic akcji.
+                                            println!("[server-databese] Database error! {}", e);
+                                            if let Err(z) = client_errors(&e, &mut write_socket).await {
+                                                println!("[server] Network error: {}", z);
+                                            }   
+                                        }
+                                        // Udalo sie wysłac -> servermsg.
+                                        let message = ServerMsg::StockBought { symbol, quantity }.to_wire();
+                                        if let Err(e) = send_data(message, &mut write_socket).await {
+                                            println!("[server] Network error: {}", e);
+                                        }
+                                    } 
+                                    else {
+                                        if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
+                                            println!("[server] Network error: {}", z);
+                                        }
+                                    }
+                                },
+                                Some(ClientMsg::GetAllClientData) => {
+                                    let stocks_fut = database::get_portfolio(&pool, id);
+                                    let alerts_fut = database::get_user_alerts(&pool, id);
+
+                                    match tokio::try_join!(stocks_fut, alerts_fut) {
+                                        Ok((stocks, alerts)) => {
+                                            let message = ServerMsg::AllClientData { stocks, alerts }.to_wire();
+                                           
+                                            if let Err(e) = send_data(message, &mut write_socket).await {
+                                                println!("[server] Network error: {}", e);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            if let Err(z) = client_errors(&e, &mut write_socket).await {
+                                                println!("[server] Network error sending error msg: {}", z);
+                                            }
+                                        }
+                                    }
                                 },
                                 None => {
                                     if let Err(e) = client_errors("Wrong command!", &mut write_socket).await {

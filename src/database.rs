@@ -1,3 +1,5 @@
+use std::str;
+use serde::{Serialize, Deserialize};
 use sqlx::{sqlite, Row};
 use crate::protocol::{AlertDirection, AlertRequest};
 
@@ -10,7 +12,7 @@ use argon2::{
 };
 
 // Struktura pomocnicza do wyciągania danych
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredAlert {
     pub symbol: String,
     pub direction: AlertDirection,
@@ -30,6 +32,19 @@ pub async fn init_database(pool: &sqlite::SqlitePool) -> Result<(), String> {
 
 pub async fn add_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertRequest) -> Result<(), String> {
     let dir_str = alert.direction.as_str();
+
+    let existing = sqlx::query("SELECT 1 FROM alerts WHERE user_id = ? AND symbol = ? AND direction = ? AND threshold = ? LIMIT 1")
+        .bind(user_id)
+        .bind(&alert.symbol)
+        .bind(dir_str)
+        .bind(alert.threshold)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("DB Error: {}", e))?;
+
+    if existing.is_some() {
+        return Err("Alert already exists".to_string());
+    }
 
     sqlx::query("INSERT INTO alerts (user_id, symbol, direction, threshold) VALUES (?, ?, ?, ?)")
         .bind(user_id)
@@ -135,4 +150,98 @@ pub async fn remove_alert(
         .map_err(|e| format!("Błąd usuwania alertu: {}", e))?;
 
     Ok(())
+}
+#[derive(Debug, Clone, Serialize, Deserialize) ]
+pub struct PortfolioStock {
+    pub symbol: String,
+    pub quantity: i32,
+    pub total_price: f64,
+}
+
+pub async fn buy_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quantity: i32, current_price: f64) -> Result<(), String> {
+    let stock_row = sqlx::query("SELECT quantity, price_total FROM positions WHERE user_id = ? AND symbol = ?")
+        .bind(user_id)
+        .bind(symbol)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(row) = stock_row {
+        let current_quantity: i32 = row.try_get("quantity").unwrap_or(0);
+        let current_summary: f64 = row.try_get("price_total").unwrap_or(0.0);
+        
+        let new_quantity = current_quantity + quantity;
+        
+        let total_value = current_summary + (quantity as f64 * current_price);
+
+        sqlx::query("UPDATE positions SET quantity = ?, price_total = ? WHERE user_id = ? AND symbol = ?")
+            .bind(new_quantity)
+            .bind(total_value)
+            .bind(user_id)
+            .bind(symbol)
+            .execute(pool).await.map_err(|e| e.to_string())?;
+
+        Ok(())
+    } 
+    else {
+       
+        sqlx::query("INSERT INTO positions (user_id, symbol, quantity, price_total) VALUES (?, ?, ?, ?)")
+            .bind(user_id)
+            .bind(symbol)
+            .bind(quantity)
+            .bind(current_price) // Twoja cena wejścia
+            .execute(pool).await.map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+}
+
+pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quantity: i32) -> Result<(), String> {
+    
+    let stock_row = sqlx::query("SELECT quantity FROM positions WHERE user_id = ? AND symbol = ?")
+        .bind(user_id)
+        .bind(symbol)
+        .fetch_optional(pool)
+        .await.map_err(|e| e.to_string())?;
+
+    let current_quantity: i32 = match stock_row {
+        Some(row) => row.try_get("quantity").unwrap_or(0),
+        None => return Err("You have no stocks of this company.".to_string()),
+    };
+
+    if current_quantity < quantity {
+        return Err(format!("You have only {} actions of given stock!.", current_quantity));
+    }
+
+    let new_quantity = current_quantity - quantity;
+
+    if new_quantity == 0 {
+        sqlx::query("DELETE FROM positions WHERE user_id = ? AND symbol = ?")
+            .bind(user_id).bind(symbol)
+            .execute(pool).await.map_err(|e| e.to_string())?;
+    } 
+    else {
+        sqlx::query("UPDATE positions SET quantity = ? WHERE user_id = ? AND symbol = ?")
+            .bind(new_quantity).bind(user_id).bind(symbol)
+            .execute(pool).await.map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+pub async fn get_portfolio(pool: &sqlx::SqlitePool, user_id: i64) -> Result<Vec<PortfolioStock>, String> {
+    let rows = sqlx::query("SELECT symbol, quantity, price_total FROM positions WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_all(pool).await.map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(PortfolioStock {
+            symbol: row.try_get("symbol").unwrap_or_default(),
+            quantity: row.try_get("quantity").unwrap_or_default(),
+            total_price: row.try_get("price_total").unwrap_or_default(),
+        });
+    }
+
+    Ok(items)
 }

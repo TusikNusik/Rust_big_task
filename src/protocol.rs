@@ -3,19 +3,18 @@
 // ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
 // DEL <SYMBOL> <ABOVE|BELOW>
 
+use serde::{Deserialize, Serialize};
+
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
 // ERR <MESSAGE>
-
-use std::collections::btree_set::SymmetricDifference;
-
-use axum::serve::Serve;
+use crate::database::{PortfolioStock, StoredAlert};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Price {
     pub value: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertDirection {
     Above,
     Below,
@@ -76,7 +75,9 @@ pub enum ClientMsg {
     SellStock {
         symbol: String,
         quantity: i32,
-    }
+    },
+
+    GetAllClientData,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +104,11 @@ pub enum ServerMsg {
         quantity: i32,
     },
 
+    AllClientData {
+        stocks: Vec<PortfolioStock>,
+        alerts: Vec<StoredAlert>,
+    },
+
     Error(String),
 }
 
@@ -117,6 +123,7 @@ pub const CMD_BUY: &str = "BUY";
 pub const CMD_SELL: &str = "SELL";
 pub const CMD_BOUGHT: &str = "BOUGHT";
 pub const CMD_SOLD: &str = "SOLD";
+pub const CMD_DATA: &str = "DATA";
 
 impl ClientMsg {
     pub fn to_wire(&self) -> String {
@@ -146,6 +153,9 @@ impl ClientMsg {
             }
             ClientMsg::SellStock { symbol, quantity } => {
                 format!("{CMD_BUY} {} {}\n", symbol, quantity)
+            }
+            ClientMsg::GetAllClientData => {
+                format!("{CMD_BUY}")
             }
         }
     }
@@ -182,6 +192,23 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
             let price: f64 = parts.next()?.parse().ok()?;
 
             Some(ServerMsg::PriceChecked { symbol, price })
+        }
+
+        CMD_DATA => {
+            let json_content = parts.collect::<Vec<_>>().join(" ");
+
+            #[derive(serde::Deserialize)]
+            struct DataPayload {
+                stocks: Vec<PortfolioStock>,
+                alerts: Vec<StoredAlert>,
+            }
+
+            let payload: DataPayload = serde_json::from_str(&json_content).ok()?;
+
+            Some(ServerMsg::AllClientData {
+                stocks: payload.stocks,
+                alerts: payload.alerts,
+            })
         }
 
         CMD_ERR => {
@@ -258,6 +285,10 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
             Some(ClientMsg::SellStock { symbol, quantity })
         },
 
+        CMD_DATA => {
+            Some(ClientMsg::GetAllClientData)
+        },
+
         _ => None,
     }
 }
@@ -286,6 +317,17 @@ impl ServerMsg {
 
             ServerMsg::Error(msg) => {
                 format!("{CMD_ERR} {}\n", msg)
+            }
+
+            ServerMsg::AllClientData { stocks, alerts } => {
+                let json_data = serde_json::json!({
+                    "stocks": stocks,
+                    "alerts": alerts
+                });
+
+                let json_payload = json_data.to_string();
+
+                format!("{CMD_DATA} {}\n", json_payload)
             }
         }
     }

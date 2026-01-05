@@ -12,3 +12,12 @@ CREATE TABLE IF NOT EXISTS alerts (
     threshold REAL NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id)
 );
+
+CREATE TABLE IF NOT EXISTS positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price_total REAL NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+);
