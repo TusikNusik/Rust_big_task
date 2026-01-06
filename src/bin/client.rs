@@ -26,7 +26,11 @@ async fn main() -> io::Result<()> {
             line = server_lines.next_line() => {
                 match line? {
                     Some(line) => {
-                        handle_server_line(&line);
+                        if let Some(msg) = handle_server_line(&line) {
+                            let wire = msg.to_wire();
+                            write_half.write_all(wire.as_bytes()).await?;
+                            write_half.flush().await?;
+                        }
                     }
                     None => {
                         println!("[client] Server closed the connection.");
@@ -170,7 +174,7 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
     }
 }
 
-fn handle_server_line(line: &str) {
+fn handle_server_line(line: &str) -> Option<ClientMsg> {
     match parse_server_msg(line) {
         Some(ServerMsg::AlertTriggered {
             symbol,
@@ -182,24 +186,33 @@ fn handle_server_line(line: &str) {
                 "[ALERT] {symbol} {:?} threshold={} current={}",
                 direction, threshold, current_price.value
             );
+            None
         }
         Some(ServerMsg::PriceChecked{symbol, price}) => {
             println!(
                 "[PRICE INFO] {symbol} price={}",
                 price
             );
+            None
         }
         Some(ServerMsg::AlertAdded { symbol, direction, threshold }) => {
             println!(
                 "[ALERT ADDED] {symbol} {:?} threshold={}",
                 direction, threshold
             );
+            None
+        }
+        Some(ServerMsg::AlertRemoved { symbol, direction }) => {
+            println!("[ALERT REMOVED] {symbol} {:?}", direction);
+            None
         }
         Some(ServerMsg::StockBought { symbol, quantity }) => {
             println!("[BOUGHT] {symbol} quantity={}", quantity);
+            None
         }
         Some(ServerMsg::StockSold { symbol, quantity }) => {
             println!("[SOLD] {symbol} quantity={}", quantity);
+            None
         }
         Some(ServerMsg::AllClientData { stocks, alerts }) => {
             println!("[DATA] Portfolio:");
@@ -224,13 +237,24 @@ fn handle_server_line(line: &str) {
                     );
                 }
             }
+            None
+        }
+        Some(ServerMsg::UserLogged) => {
+            println!("[LOGIN] Logged in successfully.");
+            Some(ClientMsg::GetAllClientData)
+        }
+        Some(ServerMsg::UserRegistered) => {
+            println!("[REGISTER] Registered successfully.");
+            None
         }
         Some(ServerMsg::Error(msg)) => {
             println!("[SERVER ERROR] {msg}");
+            None
         }
 
         None => {
             println!("[client] Unparsed server line: {line}");
+            None
         }
     }
 }
