@@ -209,7 +209,7 @@ pub async fn buy_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quan
     }
 }
 
-pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quantity: i32) -> Result<(), String> {
+pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quantity: i32, stock_price: f64) -> Result<(), String> {
     
     let stock_row = sqlx::query("SELECT quantity FROM positions WHERE user_id = ? AND symbol = ?")
         .bind(user_id)
@@ -217,8 +217,8 @@ pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, qua
         .fetch_optional(pool)
         .await.map_err(|e| e.to_string())?;
 
-    let current_quantity: i32 = match stock_row {
-        Some(row) => row.try_get("quantity").unwrap_or(0),
+    let (current_quantity, current_total_price): (i32, f64) = match stock_row {
+        Some(row) => (row.try_get("quantity").unwrap_or(0), row.try_get("price_total").unwrap_or(0.0)),
         None => return Err("You have no stocks of this company.".to_string()),
     };
 
@@ -227,6 +227,7 @@ pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, qua
     }
 
     let new_quantity = current_quantity - quantity;
+    let new_total_price = current_total_price - (quantity as f64 * stock_price);
 
     if new_quantity == 0 {
         sqlx::query("DELETE FROM positions WHERE user_id = ? AND symbol = ?")
@@ -234,8 +235,8 @@ pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, qua
             .execute(pool).await.map_err(|e| e.to_string())?;
     } 
     else {
-        sqlx::query("UPDATE positions SET quantity = ? WHERE user_id = ? AND symbol = ?")
-            .bind(new_quantity).bind(user_id).bind(symbol)
+        sqlx::query("UPDATE positions SET quantity = ? AND price_total = ? WHERE user_id = ? AND symbol = ?")
+            .bind(new_quantity).bind(new_total_price).bind(user_id).bind(symbol)
             .execute(pool).await.map_err(|e| e.to_string())?;
     }
 
