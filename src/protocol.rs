@@ -221,7 +221,6 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
         CMD_ALERT_DELETED => {
             let symbol = parts.next()?.to_string();
             let direction = AlertDirection::as_msg(parts.next()?)?;
-            let threshold: f64 = parts.next()?.parse().ok()?;
 
             Some(ServerMsg::AlertRemoved {
                 symbol,

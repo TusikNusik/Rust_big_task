@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
+use rust_huge_project::database::PortfolioStock;
 use rust_huge_project::protocol::{
     AlertDirection, AlertRequest, ClientMsg, ServerMsg, parse_server_msg,
 };
@@ -31,6 +32,7 @@ enum UiCommand {
     CheckPrice { symbol: String },
     BuyStock { symbol: String, quantity: i32 },
     SellStock { symbol: String, quantity: i32 },
+    GetAllClientData,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,10 @@ enum ClientEvent {
     Disconnected { reason: String },
     AlertTriggered { symbol: String, dir: AlertDirection, threshold: f64, current: f64 },
     AlertAdded { symbol: String, dir: AlertDirection, threshold: f64 },
+    AlertRemoved { symbol: String, dir: AlertDirection },
+    AllClientData { stocks: Vec<PortfolioStock>, alerts: Vec<AlertRow> },
+    UserLogged,
+    UserRegistered,
     ServerError(String),
     PriceChecked { symbol: String, price: f64},
     Log(String),
@@ -210,6 +216,13 @@ fn handle_command_connected(
             stream.write_all(wire.as_bytes())?;
             Ok(())
         }
+
+        UiCommand::GetAllClientData => {
+            let msg = ClientMsg::GetAllClientData;
+            let wire = msg.to_wire();
+            stream.write_all(wire.as_bytes())?;
+            Ok(())
+        }
     }
 }
 
@@ -239,6 +252,12 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
                 threshold,
             });
         }
+        Some(ServerMsg::AlertRemoved { symbol, direction }) => {
+            let _ = ev_tx.send(ClientEvent::AlertRemoved {
+                symbol,
+                dir: direction,
+            });
+        }
         Some(ServerMsg::StockBought { symbol, quantity }) => {
             let msg = format!("Bought {quantity}x {symbol}");
             let _ = ev_tx.send(ClientEvent::Log(msg));
@@ -251,11 +270,24 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
             let _ = ev_tx.send(ClientEvent::PriceChecked { symbol, price });
         }
         Some(ServerMsg::AllClientData { stocks, alerts }) => {
-            let _ = ev_tx.send(ClientEvent::Log(format!(
-                "Portfolio entries: {}, alert entries: {}",
-                stocks.len(),
-                alerts.len()
-            )));
+            let mapped_alerts = alerts
+                .into_iter()
+                .map(|alert| AlertRow {
+                    symbol: alert.symbol,
+                    dir: alert.direction,
+                    threshold: alert.threshold,
+                })
+                .collect::<Vec<_>>();
+            let _ = ev_tx.send(ClientEvent::AllClientData {
+                stocks,
+                alerts: mapped_alerts,
+            });
+        }
+        Some(ServerMsg::UserLogged) => {
+            let _ = ev_tx.send(ClientEvent::UserLogged);
+        }
+        Some(ServerMsg::UserRegistered) => {
+            let _ = ev_tx.send(ClientEvent::UserRegistered);
         }
         Some(ServerMsg::Error(msg)) => {
             let _ = ev_tx.send(ClientEvent::ServerError(msg));
@@ -286,11 +318,13 @@ struct App {
     alert_popup_message: Option<String>,
     alert_popup_data: Option<AlertRow>,
     alerts: Vec<AlertRow>,
+    portfolio: Vec<PortfolioStock>,
+    pending_trade: Option<PendingTrade>,
     logs: Vec<LogRow>,
     max_logs: usize,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct AlertRow {
     symbol: String,
     dir: AlertDirection,
@@ -326,6 +360,19 @@ enum AuthMode {
     Register,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TradeKind {
+    Buy,
+    Sell,
+}
+
+#[derive(Clone)]
+struct PendingTrade {
+    symbol: String,
+    quantity: i32,
+    kind: TradeKind,
+}
+
 impl App {
     fn new() -> Self {
         let (cmd_tx, ev_rx) = spawn_network_worker();
@@ -349,6 +396,8 @@ impl App {
             alert_popup_message: None,
             alert_popup_data: None,
             alerts: Vec::new(),
+            portfolio: Vec::new(),
+            pending_trade: None,
             logs: Vec::new(),
             max_logs: 500,
         }
@@ -419,19 +468,72 @@ impl App {
                         format!("Alert added: {symbol} {:?} threshold={threshold}", dir),
                     );
                 }
+                ClientEvent::AlertRemoved { symbol, dir } => {
+                    self.remove_local_alert(&symbol, dir);
+                    self.push_log(LogKind::Info, format!("Alert removed: {symbol} {:?}", dir));
+                }
                 ClientEvent::PriceChecked { symbol, price } => {
+                    if let Some(pending) = self.pending_trade.clone() {
+                        if pending.symbol == symbol {
+                            self.pending_trade = None;
+                            match pending.kind {
+                                TradeKind::Buy => {
+                                    self.send(UiCommand::BuyStock {
+                                        symbol: pending.symbol.clone(),
+                                        quantity: pending.quantity,
+                                    });
+                                    self.push_log(
+                                        LogKind::Info,
+                                        format!(
+                                            "[BUY] {symbol} qty={} price={price}",
+                                            pending.quantity
+                                        ),
+                                    );
+                                }
+                                TradeKind::Sell => {
+                                    self.send(UiCommand::SellStock {
+                                        symbol: pending.symbol.clone(),
+                                        quantity: pending.quantity,
+                                    });
+                                    self.push_log(
+                                        LogKind::Info,
+                                        format!(
+                                            "[SELL] {symbol} qty={} price={price}",
+                                            pending.quantity
+                                        ),
+                                    );
+                                }
+                            }
+                            return;
+                        }
+                    }
                     self.push_log(LogKind::Info, format!("[PRICE] {symbol} price={price}"));
                 }
+                ClientEvent::AllClientData { stocks, alerts } => {
+                    self.alerts = alerts;
+                    self.portfolio = stocks;
+                    self.push_log(
+                        LogKind::Info,
+                        format!(
+                            "Loaded {} portfolio entries and {} alerts.",
+                            self.portfolio.len(),
+                            self.alerts.len()
+                        ),
+                    );
+                }
+                ClientEvent::UserLogged => {
+                    self.authenticated = true;
+                    self.auth_notice = Some("Logged in successfully.".into());
+                    self.push_log(LogKind::Info, "Logged in successfully.");
+                    self.send(UiCommand::GetAllClientData);
+                }
+                ClientEvent::UserRegistered => {
+                    self.authenticated = false;
+                    self.auth_notice = Some("Registered successfully. You can log in now.".into());
+                    self.push_log(LogKind::Info, "Registered successfully.");
+                }
                 ClientEvent::ServerError(msg) => {
-                    let msg_lower = msg.to_ascii_lowercase();
-                    if msg_lower.contains("logged in") && msg_lower.contains("succes") {
-                        self.authenticated = true;
-                        self.auth_notice = Some("Logged in successfully.".into());
-                    } else if msg_lower.contains("registered") && msg_lower.contains("succes") {
-                        self.auth_notice = Some("Registered successfully. You can log in now.".into());
-                    } else {
-                        self.auth_notice = Some(msg.clone());
-                    }
+                    self.auth_notice = Some(msg.clone());
                     self.push_log(LogKind::Error, format!("[SERVER ERR] {msg}"));
                 }
                 ClientEvent::Log(s) => {
@@ -640,7 +742,12 @@ impl App {
                             let quantity = self.quantity_input.trim().parse::<i32>();
                             match quantity {
                                 Ok(qty) => {
-                                    self.send(UiCommand::BuyStock { symbol, quantity: qty });
+                                    self.pending_trade = Some(PendingTrade {
+                                        symbol: symbol.clone(),
+                                        quantity: qty,
+                                        kind: TradeKind::Buy,
+                                    });
+                                    self.send(UiCommand::CheckPrice { symbol });
                                 }
                                 Err(_) => {
                                     self.push_log(LogKind::Error, "Invalid quantity (expected number).");
@@ -667,7 +774,12 @@ impl App {
                             let quantity = self.quantity_input.trim().parse::<i32>();
                             match quantity {
                                 Ok(qty) => {
-                                    self.send(UiCommand::SellStock { symbol, quantity: qty });
+                                    self.pending_trade = Some(PendingTrade {
+                                        symbol: symbol.clone(),
+                                        quantity: qty,
+                                        kind: TradeKind::Sell,
+                                    });
+                                    self.send(UiCommand::CheckPrice { symbol });
                                 }
                                 Err(_) => {
                                     self.push_log(LogKind::Error, "Invalid quantity (expected number).");
@@ -684,11 +796,21 @@ impl App {
 
             cols[1].group(|ui| {
                 ui.heading("Active alerts");
+                if self.authenticated {
+                    let refresh_enabled = self.connected;
+                    if ui.add_enabled(refresh_enabled, egui::Button::new("Refresh data")).clicked() {
+                        self.send(UiCommand::GetAllClientData);
+                    }
+                    ui.add_space(6.0);
+                }
 
                 if self.alerts.is_empty() {
                     ui.label("No alerts added yet.");
                 } else {
-                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_source("alerts_scroll")
+                        .max_height(240.0)
+                        .show(ui, |ui| {
                         for (idx, a) in self.alerts.clone().into_iter().enumerate() {
                             ui.horizontal(|ui| {
                                 ui.label(format!("{} {:?} {}", a.symbol, a.dir, a.threshold));
@@ -704,6 +826,27 @@ impl App {
                                     }
                                 }
                             });
+                            ui.separator();
+                        }
+                    });
+                }
+            });
+
+            cols[1].group(|ui| {
+                ui.heading("Portfolio");
+
+                if self.portfolio.is_empty() {
+                    ui.label("No portfolio entries.");
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_source("portfolio_scroll")
+                        .max_height(240.0)
+                        .show(ui, |ui| {
+                        for stock in &self.portfolio {
+                            ui.label(format!(
+                                "{} quantity={} total_price={}",
+                                stock.symbol, stock.quantity, stock.total_price
+                            ));
                             ui.separator();
                         }
                     });
