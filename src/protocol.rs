@@ -3,6 +3,8 @@
 // ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
 // DEL <SYMBOL> <ABOVE|BELOW>
 
+use std::fmt::format;
+
 use serde::{Deserialize, Serialize};
 
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>
@@ -89,11 +91,21 @@ pub enum ServerMsg {
         threshold: f64,
         current_price: Price,
     },
+
     AlertAdded {
         symbol: String,
         direction: AlertDirection,
         threshold: f64,
     },
+
+    AlertRemoved {
+        symbol: String,
+        direction: AlertDirection,
+    },
+
+    UserLogged,
+
+    UserRegistered,
 
     PriceChecked {
         symbol: String,
@@ -131,6 +143,7 @@ pub const CMD_SELL: &str = "SELL";
 pub const CMD_BOUGHT: &str = "BOUGHT";
 pub const CMD_SOLD: &str = "SOLD";
 pub const CMD_DATA: &str = "DATA";
+pub const CMD_ALERT_DELETED: &str = "ALERTDELETED";
 
 impl ClientMsg {
     pub fn to_wire(&self) -> String {
@@ -205,6 +218,17 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
             })
         }
 
+        CMD_ALERT_DELETED => {
+            let symbol = parts.next()?.to_string();
+            let direction = AlertDirection::as_msg(parts.next()?)?;
+            let threshold: f64 = parts.next()?.parse().ok()?;
+
+            Some(ServerMsg::AlertRemoved {
+                symbol,
+                direction,
+            })
+        }
+
         CMD_PRICE => {
             let symbol = parts.next()?.to_string();
             let price: f64 = parts.next()?.parse().ok()?;
@@ -227,6 +251,14 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
                 stocks: payload.stocks,
                 alerts: payload.alerts,
             })
+        }
+
+        CMD_LOGIN => {
+            Some(ServerMsg::UserLogged)
+        }
+
+        CMD_REGISTER => {
+            Some(ServerMsg::UserRegistered)
         }
 
         CMD_ERR => {
@@ -337,6 +369,12 @@ impl ServerMsg {
                 threshold
             ),
 
+            ServerMsg::AlertRemoved { symbol, direction} => format!(
+                "{CMD_ALERT_DELETED} {} {}\n",
+                symbol,
+                direction.as_str()
+            ),
+
             ServerMsg::PriceChecked { symbol, price } => format!("{CMD_PRICE} {} {}\n", symbol, price),
 
             ServerMsg::StockBought { symbol, quantity } => format!("{CMD_BOUGHT} {} {}\n", symbol, quantity),
@@ -357,6 +395,10 @@ impl ServerMsg {
 
                 format!("{CMD_DATA} {}\n", json_payload)
             }
+
+            ServerMsg::UserLogged => format!("{CMD_LOGIN}\n"),
+            ServerMsg::UserRegistered => format!("{CMD_REGISTER}\n"),
+
         }
     }
 }

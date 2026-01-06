@@ -18,7 +18,6 @@ use rust_huge_project::protocol::{
 };
 use rust_huge_project::database;
 use rust_huge_project::protocol::AlertRequest;
-use std::io::{Error, ErrorKind};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions}; 
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
 
@@ -30,13 +29,11 @@ struct YahooResponse {
 #[derive(Debug, Deserialize)]
 struct Chart {
     result : Vec<ChartResult>,
-    // error : Option<serde_json::Value>
 }
 
 #[derive(Debug, Deserialize)]
 struct ChartResult {
     meta : Meta,
-    // timestamp: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,8 +42,6 @@ struct Meta {
     currency: String,
     symbol: String,
     regular_market_price: f64,
-    // previous_close: f64,
-    // regular_market_time: i64,
 }
 
 fn read_all_stocks() -> Vec<String> {
@@ -163,6 +158,8 @@ async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &Al
 
             match database::add_alert(&pool, user_id, &alert).await {
                 Ok(_) => { 
+                    let message = ServerMsg::AlertAdded { symbol: alert.symbol.clone(), direction: alert.direction, threshold: alert.threshold}.to_wire();
+                    send_data(message, write_socket).await?;
                 },
                 Err(e) => {
                     client_errors(&e, write_socket).await?;
@@ -218,12 +215,6 @@ async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLo
     Ok(())
 }
 
-// PRZERWA: CO ZOSTALO DO ZROBIENIA
-// aktualnie mam errory zwiazane z propagacja bledow oraz typami z pliku database.rs.
-// trzeba dokonczyc obluge wszystkich alertow, tak aby sie kompilowala, zmienic selecta (uruchomic nowy task ktory sobie co 5 minut sprawdza funckje
-// check_alert_for_user i sprawdzic czy baza danycg dziala. 
-
-
 async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::SqlitePool) {
     let (read_socket, mut write_socket) = socket.into_split();
 
@@ -253,6 +244,10 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             println!("[server] Socket error: {}", socket_err);
                                             break;
                                         }
+                                    }
+                                    let message = ServerMsg::AlertRemoved{symbol, direction}.to_wire();
+                                    if let Err(e) = send_data(message, &mut write_socket).await {
+                                            println!("[server] Network error: {}", e);
                                     }
                                 },
                                 Some(ClientMsg::LoginClient{username, password}) => {
@@ -337,10 +332,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                             match parse_client_msg(&line) {
                                 Some(ClientMsg::LoginClient{username, password}) => {
                                     match database::login_user(&pool, &username, &password).await {
-                                        Ok(id) => { // TODO: Wysylanie ServerMsg o udanym logowaniu.
+                                        Ok(id) => { 
                                             user_logged_in = Some(id);
-                                            if let Err(z) = client_errors("SUCCESFULLY Logged in!", &mut write_socket).await {
-                                                println!("[server] Network error: {}", z);
+                                            let message = ServerMsg::UserLogged.to_wire();
+                                            if let Err(e) = send_data(message, &mut write_socket).await {
+                                                println!("[server] Network error: {}", e);
+                                                break;  
                                             }
                                         },
                                         Err(e) => {
@@ -353,8 +350,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                 },
                                 Some(ClientMsg::RegisterClient{username, password}) => {
                                     match database::register_user(&pool, &username, &password).await {
-                                        Ok(_) => {      // TODO: Wysylanie ServerMsg o udanej rejestracji.
-                                            client_errors("Registered succesfully!", &mut write_socket).await.unwrap();
+                                        Ok(_) => { 
+                                            let message = ServerMsg::UserRegistered.to_wire();
+                                            if let Err(e) = send_data(message, &mut write_socket).await {
+                                                println!("[server] Network error: {}", e);
+                                                break;  
+                                            }
                                         },
                                         Err(e) => {
                                             if let Err(z) = client_errors("Failed to register!", &mut write_socket).await {
