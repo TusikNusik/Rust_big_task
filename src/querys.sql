@@ -19,5 +19,5 @@ CREATE TABLE IF NOT EXISTS positions (
     symbol TEXT NOT NULL,
     quantity INTEGER NOT NULL,
     price_total REAL NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
 );
