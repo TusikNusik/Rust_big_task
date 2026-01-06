@@ -83,6 +83,12 @@ fn print_help() {
     println!("Commands:");
     println!("  add <SYMBOL> <ABOVE|BELOW> <THRESHOLD>");
     println!("  del <SYMBOL> <ABOVE|BELOW>");
+    println!("  price <SYMBOL>");
+    println!("  buy <SYMBOL> <QUANTITY>");
+    println!("  sell <SYMBOL> <QUANTITY>");
+    println!("  data");
+    println!("  login <USERNAME> <PASSWORD>");
+    println!("  register <USERNAME> <PASSWORD>");
     println!("  help");
     println!("  quit");
     println!();
@@ -90,6 +96,10 @@ fn print_help() {
     println!("  add AAPL ABOVE 200");
     println!("  add TSLA BELOW 150");
     println!("  del AAPL ABOVE");
+    println!("  price AAPL");
+    println!("  buy AAPL 5");
+    println!("  sell AAPL 2");
+    println!("  data");
     println!();
 }
 
@@ -135,6 +145,27 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
             Some(ClientMsg::RegisterClient { username, password })
         }
 
+        "price" => {
+            let symbol = parts.next()?.to_string();
+            Some(ClientMsg::CheckPrice { symbol })
+        }
+
+        "buy" => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+
+            Some(ClientMsg::BuyStock { symbol, quantity })
+        }
+
+        "sell" => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+
+            Some(ClientMsg::SellStock { symbol, quantity })
+        }
+
+        "data" => Some(ClientMsg::GetAllClientData),
+
         _ => None,
     }
 }
@@ -163,6 +194,36 @@ fn handle_server_line(line: &str) {
                 "[ALERT ADDED] {symbol} {:?} threshold={}",
                 direction, threshold
             );
+        }
+        Some(ServerMsg::StockBought { symbol, quantity }) => {
+            println!("[BOUGHT] {symbol} quantity={}", quantity);
+        }
+        Some(ServerMsg::StockSold { symbol, quantity }) => {
+            println!("[SOLD] {symbol} quantity={}", quantity);
+        }
+        Some(ServerMsg::AllClientData { stocks, alerts }) => {
+            println!("[DATA] Portfolio:");
+            if stocks.is_empty() {
+                println!("  (empty)");
+            } else {
+                for stock in stocks {
+                    println!(
+                        "  {} quantity={} total_price={}",
+                        stock.symbol, stock.quantity, stock.total_price
+                    );
+                }
+            }
+            println!("[DATA] Alerts:");
+            if alerts.is_empty() {
+                println!("  (empty)");
+            } else {
+                for alert in alerts {
+                    println!(
+                        "  {} {:?} threshold={}",
+                        alert.symbol, alert.direction, alert.threshold
+                    );
+                }
+            }
         }
         Some(ServerMsg::Error(msg)) => {
             println!("[SERVER ERROR] {msg}");

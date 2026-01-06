@@ -159,10 +159,10 @@ impl ClientMsg {
                 format!("{CMD_BUY} {} {}\n", symbol, quantity)
             }
             ClientMsg::SellStock { symbol, quantity } => {
-                format!("{CMD_BUY} {} {}\n", symbol, quantity)
+                format!("{CMD_SELL} {} {}\n", symbol, quantity)
             }
             ClientMsg::GetAllClientData => {
-                format!("{CMD_BUY}")
+                format!("{CMD_DATA}\n")
             }
         }
     }

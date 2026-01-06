@@ -28,6 +28,9 @@ enum UiCommand {
     RemoveAlert { symbol: String, dir: AlertDirection },
     LoginClient { username: String, password: String },
     RegisterClient { username: String, password: String },
+    CheckPrice { symbol: String },
+    BuyStock { symbol: String, quantity: i32 },
+    SellStock { symbol: String, quantity: i32 },
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +189,27 @@ fn handle_command_connected(
             stream.write_all(wire.as_bytes())?;
             Ok(())
         }
+
+        UiCommand::CheckPrice { symbol } => {
+            let msg = ClientMsg::CheckPrice { symbol };
+            let wire = msg.to_wire();
+            stream.write_all(wire.as_bytes())?;
+            Ok(())
+        }
+
+        UiCommand::BuyStock { symbol, quantity } => {
+            let msg = ClientMsg::BuyStock { symbol, quantity };
+            let wire = msg.to_wire();
+            stream.write_all(wire.as_bytes())?;
+            Ok(())
+        }
+
+        UiCommand::SellStock { symbol, quantity } => {
+            let msg = ClientMsg::SellStock { symbol, quantity };
+            let wire = msg.to_wire();
+            stream.write_all(wire.as_bytes())?;
+            Ok(())
+        }
     }
 }
 
@@ -226,6 +250,13 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
         Some(ServerMsg::PriceChecked{ symbol, price}) => {
             let _ = ev_tx.send(ClientEvent::PriceChecked { symbol, price });
         }
+        Some(ServerMsg::AllClientData { stocks, alerts }) => {
+            let _ = ev_tx.send(ClientEvent::Log(format!(
+                "Portfolio entries: {}, alert entries: {}",
+                stocks.len(),
+                alerts.len()
+            )));
+        }
         Some(ServerMsg::Error(msg)) => {
             let _ = ev_tx.send(ClientEvent::ServerError(msg));
         }
@@ -244,6 +275,7 @@ struct App {
     symbol_input: String,
     dir_input: AlertDirection,
     threshold_input: String,
+    quantity_input: String,
     username_input: String,
     password_input: String,
     command_kind: CommandKind,
@@ -283,6 +315,9 @@ enum LogKind {
 enum CommandKind {
     AddAlert,
     RemoveAlert,
+    CheckPrice,
+    BuyStock,
+    SellStock,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -303,6 +338,7 @@ impl App {
             symbol_input: "AAPL".into(),
             dir_input: AlertDirection::Above,
             threshold_input: "200".into(),
+            quantity_input: "1".into(),
             username_input: "user".into(),
             password_input: "pass".into(),
             command_kind: CommandKind::AddAlert,
@@ -347,6 +383,16 @@ impl App {
                     self.push_log(LogKind::Error, format!("Disconnected: {reason}"));
                 }
                 ClientEvent::AlertTriggered { symbol, dir, threshold, current } => {
+                    self.alert_popup_message = Some(format!(
+                        "[ALERT] {symbol} {:?} threshold={threshold} current={current}",
+                        dir
+                    ));
+                    self.alert_popup_data = Some(AlertRow {
+                        symbol: symbol.clone(),
+                        dir,
+                        threshold,
+                    });
+                    self.alert_popup_open = true;
                     self.push_log(
                         LogKind::Alert,
                         format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
@@ -373,7 +419,9 @@ impl App {
                         format!("Alert added: {symbol} {:?} threshold={threshold}", dir),
                     );
                 }
-                ClientEvent::PriceChecked { symbol: _, price: _ } => {}
+                ClientEvent::PriceChecked { symbol, price } => {
+                    self.push_log(LogKind::Info, format!("[PRICE] {symbol} price={price}"));
+                }
                 ClientEvent::ServerError(msg) => {
                     let msg_lower = msg.to_ascii_lowercase();
                     if msg_lower.contains("logged in") && msg_lower.contains("succes") {
@@ -466,10 +514,16 @@ impl App {
                         .selected_text(match self.command_kind {
                             CommandKind::AddAlert => "ADD",
                             CommandKind::RemoveAlert => "DEL",
+                            CommandKind::CheckPrice => "PRICE",
+                            CommandKind::BuyStock => "BUY",
+                            CommandKind::SellStock => "SELL",
                         })
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.command_kind, CommandKind::AddAlert, "ADD");
                             ui.selectable_value(&mut self.command_kind, CommandKind::RemoveAlert, "DEL");
+                            ui.selectable_value(&mut self.command_kind, CommandKind::CheckPrice, "PRICE");
+                            ui.selectable_value(&mut self.command_kind, CommandKind::BuyStock, "BUY");
+                            ui.selectable_value(&mut self.command_kind, CommandKind::SellStock, "SELL");
                         });
                 });
 
@@ -551,6 +605,74 @@ impl App {
                                 dir: self.dir_input,
                             });
                             self.remove_local_alert(&symbol, self.dir_input);
+                        }
+                    }
+                    CommandKind::CheckPrice => {
+                        ui.horizontal(|ui| {
+                            ui.label("Symbol:");
+                            ui.text_edit_singleline(&mut self.symbol_input);
+                        });
+
+                        ui.add_space(8.0);
+
+                        let price_enabled = self.connected;
+                        if ui.add_enabled(price_enabled, egui::Button::new("Send")).clicked() {
+                            let symbol = self.normalize_symbol();
+                            self.send(UiCommand::CheckPrice { symbol });
+                        }
+                    }
+                    CommandKind::BuyStock => {
+                        ui.horizontal(|ui| {
+                            ui.label("Symbol:");
+                            ui.text_edit_singleline(&mut self.symbol_input);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Quantity:");
+                            ui.text_edit_singleline(&mut self.quantity_input);
+                        });
+
+                        ui.add_space(8.0);
+
+                        let buy_enabled = self.connected;
+                        if ui.add_enabled(buy_enabled, egui::Button::new("Send")).clicked() {
+                            let symbol = self.normalize_symbol();
+                            let quantity = self.quantity_input.trim().parse::<i32>();
+                            match quantity {
+                                Ok(qty) => {
+                                    self.send(UiCommand::BuyStock { symbol, quantity: qty });
+                                }
+                                Err(_) => {
+                                    self.push_log(LogKind::Error, "Invalid quantity (expected number).");
+                                }
+                            }
+                        }
+                    }
+                    CommandKind::SellStock => {
+                        ui.horizontal(|ui| {
+                            ui.label("Symbol:");
+                            ui.text_edit_singleline(&mut self.symbol_input);
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Quantity:");
+                            ui.text_edit_singleline(&mut self.quantity_input);
+                        });
+
+                        ui.add_space(8.0);
+
+                        let sell_enabled = self.connected;
+                        if ui.add_enabled(sell_enabled, egui::Button::new("Send")).clicked() {
+                            let symbol = self.normalize_symbol();
+                            let quantity = self.quantity_input.trim().parse::<i32>();
+                            match quantity {
+                                Ok(qty) => {
+                                    self.send(UiCommand::SellStock { symbol, quantity: qty });
+                                }
+                                Err(_) => {
+                                    self.push_log(LogKind::Error, "Invalid quantity (expected number).");
+                                }
+                            }
                         }
                     }
                 }
