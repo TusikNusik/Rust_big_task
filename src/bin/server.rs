@@ -20,6 +20,9 @@ use rust_huge_project::database;
 use rust_huge_project::protocol::AlertRequest;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions}; 
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
+use tracing_subscriber;
+use tracing::{info, error, warn};
+
 
 #[derive(Debug, Deserialize)]
 struct YahooResponse {
@@ -62,7 +65,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
     let url_base = "https://query1.finance.yahoo.com/v8/finance/chart/";
 
     loop {
-        println!("[server scrapper] STARTING SCRAPPING");
+        info!("[server scrapper] STARTING SCRAPPING");
         let mut temp_map = HashMap::new();
 
         for i in &all_stocks {
@@ -83,19 +86,19 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
                                 let yahoo_chart = yahoo_response.chart;
 
                                 if let Some(stock_data) = yahoo_chart.result.first() {
-                                    println!("[server scrapper] Stock symbol and currency: {} {}", stock_data.meta.symbol, stock_data.meta.currency);
-                                    println!("[server scrapper] Stock price {}", stock_data.meta.regular_market_price);
+                                    info!("[server scrapper] Stock symbol and currency: {} {}", stock_data.meta.symbol, stock_data.meta.currency);
+                                    info!("[server scrapper] Stock price {}", stock_data.meta.regular_market_price);
                                     temp_map.insert(stock_data.meta.symbol.clone(), stock_data.meta.regular_market_price);
                                 }
                             }
-                            Err(error) => println!("[server scrapper] Failed Json convertion: {}", error)
+                            Err(error) => error!("[server scrapper] Failed Json convertion: {}", error)
                         }
                     }
                     else {
-                        println!("[server scrapper] Request not succesfull!");
+                        warn!("[server scrapper] Request not succesfull!");
                     }
                 }
-                Err(error) => println!("[server scrapper] Scrapping network error: {}", error)
+                Err(error) => warn!("[server scrapper] Scrapping network error: {}", error)
 
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -108,7 +111,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
             writer.extend(temp_map);
         }
 
-        println!("[server] Completed scrapping all NASDAQ stocks, clients may join!");
+        info!("[server] Completed scrapping all NASDAQ stocks, clients may join!");
 
         tokio::time::sleep(Duration::from_secs(60)).await;
     }
@@ -190,7 +193,7 @@ async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLo
     let alerts = match database::get_user_alerts(pool, user_id).await {
         Ok(a) => a,
         Err(e) => {
-            println!("[server-databese] Database error! {}", e);
+            error!("[server-database] Database error! {}", e);
             return Ok(());
         }
     };
@@ -230,83 +233,89 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                         if let Some(id) = user_logged_in  {
                             match parse_client_msg(&line) {
                                 Some(ClientMsg::AddAlert(alert)) => {
-                                    println!("AlertRequest :  {:?}{}{}", alert.direction, alert.symbol, alert.threshold);
+                                    info!("[user: {}] Alert Request:  {:?}{}{}", id, alert.direction, alert.symbol, alert.threshold);
                                     if let Err(e) = prepare_new_alert(&pool, id, &alert, &map_pointer, &mut write_socket).await {
-                                        println!("[server-databese] Failed to add alert to database! {}", e);
+                                        error!("[server-database] Failed to add alert to database! {}", e);
                                     }
                                 },  
                                 Some(ClientMsg::RemoveAlert{symbol, direction}) => {
-                                    println!("Remove Alert : {}{:?}", symbol, direction);
+                                    info!("[user: {}] Remove Alert: {}{:?}", id, symbol, direction);
                                     if let Err(e) = database::remove_alert(&pool, id, &symbol, direction).await {
-                                        println!("[server-databese] Failed to remove from database! {}", e);
+                                        error!("[server-database] Failed to remove from database! {}", e);
                                         if let Err(socket_err) = client_errors(&e, &mut write_socket).await {
-                                            println!("[server] Socket error: {}", socket_err);
+                                            error!("[server] Socket error: {}", socket_err);
                                             break;
                                         }
                                     }
                                     let message = ServerMsg::AlertRemoved{symbol, direction}.to_wire();
                                     if let Err(e) = send_data(message, &mut write_socket).await {
-                                            println!("[server] Network error: {}", e);
+                                        error!("[server] Network error: {}", e);
                                     }
                                 },
-                                Some(ClientMsg::LoginClient{username: _, password: _}) => {
+                                Some(ClientMsg::LoginClient{username, password: _}) => {
+                                    warn!("[user: {}] User already logged-in: {}", id, username);
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
-                                        println!("[server] Network error: {}", z);
+                                        error!("[server] Network error: {}", z);
                                     }          
                                 },
-                                Some(ClientMsg::RegisterClient{username: _, password: _}) => {
+                                Some(ClientMsg::RegisterClient{username, password: _}) => {
+                                    warn!("[user: {}] User already registered: {}", id, username);
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
-                                        println!("[server] Network error: {}", z);
+                                        error!("[server] Network error: {}", z);
                                     }   
                                 },
                                 Some(ClientMsg::CheckPrice{symbol}) => {
+                                    info!("[user: {}] Check price: {}", id, symbol);
                                     if let Err(z) = check_price(&symbol, &map_pointer, &mut write_socket).await {
-                                        println!("[server] Network error: {}", z);
+                                        error!("[server] Network error: {}", z);
                                     }   
                                 },
                                 Some(ClientMsg::SellStock{symbol, quantity}) => {
+                                    info!("[user: {}] Sell stock: {} {}", id, symbol, quantity);
                                     if let Some(price) = check_price_of_stock(&map_pointer, &symbol).await {
                                         if let Err(e) = database::sell_stock(&pool, id, &symbol, quantity, price).await {
-                                            println!("[server-databese] Database error! {}", e);
+                                            error!("[server-database] Database error! {}", e);
                                             if let Err(z) = client_errors(&e, &mut write_socket).await {
-                                                println!("[server] Network error: {}", z);
+                                                error!("[server] Network error: {}", z);
                                             }   
                                         }
                                         else {
                                             let message = ServerMsg::StockSold { symbol, quantity }.to_wire();
                                             if let Err(e) = send_data(message, &mut write_socket).await {
-                                                println!("[server] Network error: {}", e);
+                                                error!("[server] Network error: {}", e);
                                             }
                                         }
                                     }
                                     else {
                                         if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
-                                            println!("[server] Network error: {}", z);
+                                            error!("[server] Network error: {}", z);
                                         }
                                     }
 
                                 },
                                 Some(ClientMsg::BuyStock{symbol, quantity}) => {
+                                    info!("[user: {}] Buy stock: {} {}", id, symbol, quantity);
                                     if let Some(price) = check_price_of_stock(&map_pointer, &symbol).await {
                                         if let Err(e) = database::buy_stock(&pool, id, &symbol, quantity, price).await {
-                                            println!("[server-databese] Database error! {}", e);
+                                            error!("[server-database] Database error! {}", e);
                                             if let Err(z) = client_errors(&e, &mut write_socket).await {
-                                                println!("[server] Network error: {}", z);
+                                                error!("[server] Network error: {}", z);
                                             }   
                                         }
                                      
                                         let message = ServerMsg::StockBought { symbol, quantity }.to_wire();
                                         if let Err(e) = send_data(message, &mut write_socket).await {
-                                            println!("[server] Network error: {}", e);
+                                            error!("[server] Network error: {}", e);
                                         }
                                     } 
                                     else {
                                         if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
-                                            println!("[server] Network error: {}", z);
+                                            error!("[server] Network error: {}", z);
                                         }
                                     }
                                 },
                                 Some(ClientMsg::GetAllClientData) => {
+                                    info!("[user: {}] DATA", id);
                                     let stocks_fut = database::get_portfolio(&pool, id);
                                     let alerts_fut = database::get_user_alerts(&pool, id);
 
@@ -315,20 +324,21 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             let message = ServerMsg::AllClientData { stocks, alerts }.to_wire();
                                            
                                             if let Err(e) = send_data(message, &mut write_socket).await {
-                                                println!("[server] Network error: {}", e);
+                                                error!("[server] Network error: {}", e);
                                             }
                                         },
                                         Err(e) => {
-                                            println!("[server-databese] Database error! {}", e);
+                                            error!("[server-database] Database error! {}", e);
                                             if let Err(z) = client_errors(&e, &mut write_socket).await {
-                                                println!("[server] Network error sending error msg: {}", z);
+                                                error!("[server] Network error sending error msg: {}", z);
                                             }
                                         }
                                     }
                                 },
                                 None => {
+                                    warn!("[user: {}] Wrong command!", id);
                                     if let Err(e) = client_errors("Wrong command!", &mut write_socket).await {
-                                        println!("[server] Network error: {}", e);
+                                        error!("[server] Network error: {}", e);
                                         break;
                                     }
                                 }
@@ -337,45 +347,45 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                         else {
                             match parse_client_msg(&line) {
                                 Some(ClientMsg::LoginClient{username, password}) => {
+                                    info!("New log-in request!");
                                     match database::login_user(&pool, &username, &password).await {
                                         Ok(id) => { 
                                             user_logged_in = Some(id);
                                             let message = ServerMsg::UserLogged.to_wire();
                                             if let Err(e) = send_data(message, &mut write_socket).await {
-                                                println!("[server] Network error: {}", e);
+                                                error!("[server] Network error: {}", e);
                                                 break;  
                                             }
                                         },
                                         Err(e) => {
-                                            println!("[server-databese] Database error! {}", e);
                                             if let Err(z) = client_errors("Failed to log-in!", &mut write_socket).await {
-                                                println!("[server] Network error: {}", z);
+                                                error!("[server] Network error: {}", z);
                                             }
-                                            println!("[server] Failed to log-in the client {}", e);
+                                            warn!("[server] Failed to log-in the client {}", e);
                                         }
                                     }
                                 },
                                 Some(ClientMsg::RegisterClient{username, password}) => {
+                                    info!("New register request!");
                                     match database::register_user(&pool, &username, &password).await {
                                         Ok(_) => { 
                                             let message = ServerMsg::UserRegistered.to_wire();
                                             if let Err(e) = send_data(message, &mut write_socket).await {
-                                                println!("[server] Network error: {}", e);
+                                                error!("[server] Network error: {}", e);
                                                 break;  
                                             }
                                         },
                                         Err(e) => {
-                                            println!("[server-databese] Database error! {}", e);
                                             if let Err(z) = client_errors("Failed to register!", &mut write_socket).await {
-                                                println!("[server] Network error: {}", z);
+                                                error!("[server] Network error: {}", z);
                                             }
-                                            println!("[server] Failed to register client {}", e);
+                                            warn!("[server] Failed to register client {}", e);
                                         }
                                     }
                                 },
                                 _ => {
                                       if let Err(e) = client_errors("User not logged in!", &mut write_socket).await {
-                                        println!("[server] Network error: {}", e);
+                                        error!("[server] Network error: {}", e);
                                         break;
                                     }
                                 }
@@ -383,21 +393,21 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                         }
                     }
                     Ok(None) => {
-                       println!("[server] Client gracefully disconnected, ending current connection!");
+                       info!("[server] Client gracefully disconnected, ending current connection!");
                        break;
                     }
                     Err(e) => {
-                        println!("[server] Network error: {}", e);
+                        error!("[server] Network error: {}", e);
                         break; 
                     }
                 }
             }   
             _ = tokio::time::sleep(Duration::from_secs(60)) => {
-                println!("[server] Sending alerts to client!");
+                info!("[server] Sending alerts to client!");
                 if let Some(uid) = user_logged_in {
-                    println!("[server] Checking alerts for user {}", uid);
+                    info!("[server] Checking alerts for user {}", uid);
                     if let Err(e) = check_alerts_for_user(&pool, uid, &map_pointer, &mut write_socket).await {
-                        println!("[server] Network error: {}", e);
+                        error!("[server] Network error: {}", e);
                         break;
                     }
                 }
@@ -412,6 +422,10 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    tracing_subscriber::fmt()
+        .with_env_filter("info") 
+        .init();
+
     let db_opts = SqliteConnectOptions::new()
         .filename("database.db")
         .create_if_missing(true);
@@ -423,7 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     
     if let Err(e) = database::init_database(&pool).await {
-        println!("[server-databese] Database Init error! {}", e);
+       error!("[server-database] Database Init error! {}", e);
     }
 
     let stock_symbols = read_all_stocks();
@@ -435,7 +449,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = scrap_stocks(stock_map_clone, stock_symbols).await;
     });
 
-    println!("[server] Server runs. Press CTR + C to stop it.");
+    info!("[server] Server runs. Press CTR + C to stop it.");
     
     let listener = TcpListener::bind("127.0.0.1:1234").await.unwrap();
 
@@ -446,7 +460,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             listener = listener.accept() => {
                 match listener {
                     Ok((socket, addr)) => {
-                        println!("[server] New connection from: {}", addr);
+                        info!("[server] New connection from: {}", addr);
                         let stock_map_client_clone = stock_map.clone();
                         let pool_client = pool.clone();
 
@@ -454,7 +468,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             handle_client(socket, stock_map_client_clone, pool_client).await;
                         });
                     }
-                    Err(_) => println!("[server] Invlid incoming connection!")
+                    Err(_) => warn!("[server] Invlid incoming connection!")
                 }
             }
             _ = tokio::signal::ctrl_c() => {

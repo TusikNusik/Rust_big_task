@@ -2,7 +2,6 @@ use std::str;
 use serde::{Serialize, Deserialize};
 use sqlx::{sqlite, Row};
 use crate::protocol::{AlertDirection, AlertRequest};
-
 use argon2::{
     password_hash::{
         rand_core::OsRng,
@@ -55,7 +54,6 @@ pub async fn add_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertR
         .await
         .map_err(|e| format!("Failed to add alert: {}", e))?;
 
-    println!("[database] Succesfully added new alert!");
     Ok(())
 }
 
@@ -74,7 +72,6 @@ pub async fn register_user(pool: &sqlite::SqlitePool, username : &str, password 
 
     match register_result {
         Ok(_) =>  {
-            println!("[database] Succesfully registered new user!");
             Ok(())
         },
         Err(sqlx::Error::Database(db_err)) if db_err.message().contains("UNIQUE constraint") => {
