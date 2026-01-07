@@ -442,6 +442,7 @@ impl App {
                         threshold,
                     });
                     self.alert_popup_open = true;
+                    play_alert_sound();
                     self.push_log(
                         LogKind::Alert,
                         format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
@@ -965,4 +966,19 @@ fn now_hhmmss() -> String {
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;
     format!("{:02}:{:02}:{:02}", h, m, s)
+}
+
+fn play_alert_sound() {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "[console]::beep(880,200)"])
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(b"\x07");
+        let _ = stdout.flush();
+    }
 }
