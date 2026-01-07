@@ -22,7 +22,7 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions};
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
 use tracing_subscriber;
 use tracing::{info, error, warn};
-
+use anyhow::{Context, Result};
 
 #[derive(Debug, Deserialize)]
 struct YahooResponse {
@@ -420,7 +420,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter("info") 
@@ -433,7 +433,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(db_opts)
-        .await?;
+        .await
+        .context("[server-database] Failed to connect to the database!")?;
 
     
     if let Err(e) = database::init_database(&pool).await {
@@ -446,12 +447,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stock_map_clone = stock_map.clone();
     tokio::spawn(async move {
-        let _ = scrap_stocks(stock_map_clone, stock_symbols).await;
+        if let Err(e) = scrap_stocks(stock_map_clone, stock_symbols).await {
+            error!("[server-scrapper] Scrapper failed {}", e);
+        }
     });
 
     info!("[server] Server runs. Press CTR + C to stop it.");
     
-    let listener = TcpListener::bind("127.0.0.1:1234").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:1234")
+        .await
+        .context("[server] Failed to bind")?;
 
 
     // Waiting for either new client or closing argument.
