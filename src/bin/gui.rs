@@ -320,6 +320,7 @@ struct App {
     alerts: Vec<AlertRow>,
     portfolio: Vec<PortfolioStock>,
     pending_trade: Option<PendingTrade>,
+    style_initialized: bool,
     logs: Vec<LogRow>,
     max_logs: usize,
 }
@@ -398,6 +399,7 @@ impl App {
             alerts: Vec::new(),
             portfolio: Vec::new(),
             pending_trade: None,
+            style_initialized: false,
             logs: Vec::new(),
             max_logs: 500,
         }
@@ -844,9 +846,14 @@ impl App {
                         .max_height(240.0)
                         .show(ui, |ui| {
                         for stock in &self.portfolio {
+                            let (amount_label, amount_value) = if stock.total_price >= 0.0 {
+                                ("spent", stock.total_price)
+                            } else {
+                                ("earned", -stock.total_price)
+                            };
                             ui.label(format!(
-                                "{} quantity={} total_price={}",
-                                stock.symbol, stock.quantity, stock.total_price
+                                "{} quantity={} {} {:.3}",
+                                stock.symbol, stock.quantity, amount_label, amount_value
                             ));
                             ui.separator();
                         }
@@ -859,6 +866,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.style_initialized {
+            configure_dashboard_light_style(ctx);
+            self.style_initialized = true;
+        }
+
         self.drain_events();
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -957,6 +969,47 @@ impl eframe::App for App {
 
         ctx.request_repaint_after(Duration::from_millis(50));
     }
+}
+
+fn configure_dashboard_light_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+    style.visuals = egui::Visuals::light();
+    style.visuals.window_fill = egui::Color32::from_rgb(244, 247, 251);
+    style.visuals.panel_fill = egui::Color32::from_rgb(236, 242, 248);
+    style.visuals.extreme_bg_color = egui::Color32::from_rgb(228, 236, 244);
+    style.visuals.selection.bg_fill = egui::Color32::from_rgb(26, 110, 192);
+    style.visuals.hyperlink_color = egui::Color32::from_rgb(20, 120, 200);
+    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(246, 249, 252);
+    style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 45, 55));
+    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(220, 234, 248);
+    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 224, 246);
+    style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.2, egui::Color32::from_rgb(25, 35, 45));
+    style.visuals.window_rounding = egui::Rounding::same(10.0);
+    style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(236, 242, 248);
+    style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 65, 75));
+
+    style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.spacing.window_margin = egui::Margin::same(12.0);
+
+    style.text_styles.insert(
+        egui::TextStyle::Heading,
+        egui::FontId::new(22.0, egui::FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Body,
+        egui::FontId::new(16.0, egui::FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Button,
+        egui::FontId::new(16.0, egui::FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Small,
+        egui::FontId::new(12.0, egui::FontFamily::Proportional),
+    );
+
+    ctx.set_style(style);
 }
 
 fn now_hhmmss() -> String {
