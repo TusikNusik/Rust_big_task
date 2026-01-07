@@ -250,6 +250,18 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
             })
         }
 
+        CMD_BOUGHT => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+            Some(ServerMsg::StockBought { symbol, quantity })
+        }
+
+        CMD_SOLD => {
+            let symbol = parts.next()?.to_string();
+            let quantity: i32 = parts.next()?.parse().ok()?;
+            Some(ServerMsg::StockSold { symbol, quantity })
+        }
+
         CMD_LOGIN => {
             Some(ServerMsg::UserLogged)
         }
@@ -448,4 +460,159 @@ mod tests {
         }
     }
 
+    #[test]
+    fn add_alert_roundtrip() {
+        let msg = ClientMsg::AddAlert(AlertRequest {
+            symbol: "AAPL".into(),
+            direction: AlertDirection::Above,
+            threshold: 200.5,
+        });
+        let wire = msg.to_wire();
+        assert_eq!(wire, "ADD AAPL ABOVE 200.5\n");
+        match parse_client_msg(&wire) {
+            Some(ClientMsg::AddAlert(alert)) => {
+                assert_eq!(alert.symbol, "AAPL");
+                assert_eq!(alert.direction, AlertDirection::Above);
+                assert_eq!(alert.threshold, 200.5);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn remove_alert_roundtrip() {
+        let msg = ClientMsg::RemoveAlert {
+            symbol: "TSLA".into(),
+            direction: AlertDirection::Below,
+        };
+        let wire = msg.to_wire();
+        assert_eq!(wire, "DEL TSLA BELOW\n");
+        match parse_client_msg(&wire) {
+            Some(ClientMsg::RemoveAlert { symbol, direction }) => {
+                assert_eq!(symbol, "TSLA");
+                assert_eq!(direction, AlertDirection::Below);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn trigger_parse() {
+        let wire = "TRIGGER AAPL ABOVE 150 155\n";
+        match parse_server_msg(wire) {
+            Some(ServerMsg::AlertTriggered {
+                symbol,
+                direction,
+                threshold,
+                current_price,
+            }) => {
+                assert_eq!(symbol, "AAPL");
+                assert_eq!(direction, AlertDirection::Above);
+                assert_eq!(threshold, 150.0);
+                assert_eq!(current_price.value, 155.0);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn alert_added_parse() {
+        let wire = "ALERTADDED AAPL BELOW 120.25\n";
+        match parse_server_msg(wire) {
+            Some(ServerMsg::AlertAdded {
+                symbol,
+                direction,
+                threshold,
+            }) => {
+                assert_eq!(symbol, "AAPL");
+                assert_eq!(direction, AlertDirection::Below);
+                assert_eq!(threshold, 120.25);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn alert_removed_parse() {
+        let wire = "ALERTDELETED AAPL ABOVE\n";
+        match parse_server_msg(wire) {
+            Some(ServerMsg::AlertRemoved { symbol, direction }) => {
+                assert_eq!(symbol, "AAPL");
+                assert_eq!(direction, AlertDirection::Above);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn price_checked_parse() {
+        let wire = "PRICE AAPL 123.45\n";
+        match parse_server_msg(wire) {
+            Some(ServerMsg::PriceChecked { symbol, price }) => {
+                assert_eq!(symbol, "AAPL");
+                assert_eq!(price, 123.45);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn bought_sold_parse() {
+        let buy_wire = "BOUGHT AAPL 3\n";
+        match parse_server_msg(buy_wire) {
+            Some(ServerMsg::StockBought { symbol, quantity }) => {
+                assert_eq!(symbol, "AAPL");
+                assert_eq!(quantity, 3);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+
+        let sell_wire = "SOLD TSLA 2\n";
+        match parse_server_msg(sell_wire) {
+            Some(ServerMsg::StockSold { symbol, quantity }) => {
+                assert_eq!(symbol, "TSLA");
+                assert_eq!(quantity, 2);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn data_roundtrip() {
+        let stocks = vec![PortfolioStock {
+            symbol: "AAPL".into(),
+            quantity: 2,
+            total_price: 123.0,
+        }];
+        let alerts = vec![StoredAlert {
+            symbol: "AAPL".into(),
+            direction: AlertDirection::Above,
+            threshold: 150.0,
+        }];
+        let wire = ServerMsg::AllClientData { stocks, alerts }.to_wire();
+        match parse_server_msg(&wire) {
+            Some(ServerMsg::AllClientData { stocks, alerts }) => {
+                assert_eq!(stocks.len(), 1);
+                assert_eq!(stocks[0].symbol, "AAPL");
+                assert_eq!(stocks[0].quantity, 2);
+                assert_eq!(stocks[0].total_price, 123.0);
+                assert_eq!(alerts.len(), 1);
+                assert_eq!(alerts[0].symbol, "AAPL");
+                assert_eq!(alerts[0].direction, AlertDirection::Above);
+                assert_eq!(alerts[0].threshold, 150.0);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn error_roundtrip() {
+        let wire = wire_error("Something went wrong");
+        match parse_server_msg(&wire) {
+            Some(ServerMsg::Error(msg)) => {
+                assert_eq!(msg, "Something went wrong");
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
 }

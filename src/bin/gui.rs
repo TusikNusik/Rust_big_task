@@ -82,11 +82,7 @@ fn network_thread(cmd_rx: Receiver<UiCommand>, ev_tx: Sender<ClientEvent>) {
                                     }
                                 };
 
-                                state = NetState::Connected {
-                                    addr,
-                                    stream,
-                                    reader,
-                                };
+                                state = NetState::Connected { stream, reader };
                                 let _ = ev_tx.send(ClientEvent::Connected);
                                 let _ = ev_tx.send(ClientEvent::Log("Connected.".into()));
                             }
@@ -102,7 +98,7 @@ fn network_thread(cmd_rx: Receiver<UiCommand>, ev_tx: Sender<ClientEvent>) {
                 }
             }
 
-            NetState::Connected { addr: _, stream, reader } => {
+            NetState::Connected { stream, reader } => {
                 match cmd_rx.recv_timeout(Duration::from_millis(25)) {
                     Ok(cmd) => {
                         if handle_command_connected(cmd, stream, &ev_tx).is_err() {
@@ -139,7 +135,6 @@ fn network_thread(cmd_rx: Receiver<UiCommand>, ev_tx: Sender<ClientEvent>) {
 enum NetState {
     Disconnected,
     Connected {
-        addr: String,
         stream: TcpStream,
         reader: BufReader<TcpStream>,
     },
@@ -452,7 +447,7 @@ impl App {
                 }
                 ClientEvent::AlertAdded { symbol, dir, threshold } => {
                     let popup_msg = format!("Alert added: {symbol} {:?} threshold={threshold}", dir);
-                    if !self.alerts.iter().any(|a| a.symbol == symbol && a.dir == dir && a.threshold == threshold) {
+                    if !self.alerts.iter().any(|a| a.symbol == symbol && a.dir == dir) {
                         self.alerts.push(AlertRow {
                             symbol: symbol.clone(),
                             dir,
@@ -513,7 +508,13 @@ impl App {
                     self.push_log(LogKind::Info, format!("[PRICE] {symbol} price={price}"));
                 }
                 ClientEvent::AllClientData { stocks, alerts } => {
-                    self.alerts = alerts;
+                    let mut deduped = Vec::new();
+                    for alert in alerts {
+                        if !deduped.iter().any(|a: &AlertRow| a.symbol == alert.symbol && a.dir == alert.dir) {
+                            deduped.push(alert);
+                        }
+                    }
+                    self.alerts = deduped;
                     self.portfolio = stocks;
                     self.push_log(
                         LogKind::Info,
@@ -665,8 +666,8 @@ impl App {
                             let threshold = self.threshold_input.trim().parse::<f64>();
                             match threshold {
                                 Ok(th) => {
-                                    if self.alerts.iter().any(|a| a.symbol == symbol && a.dir == self.dir_input && a.threshold == th) {
-                                        self.push_log(LogKind::Error, "Alert already exists.");
+                                    if self.alerts.iter().any(|a| a.symbol == symbol && a.dir == self.dir_input) {
+                                        self.push_log(LogKind::Error, "Alert for this symbol and direction already exists.");
                                         return;
                                     }
                                     self.send(UiCommand::AddAlert {
