@@ -3,8 +3,6 @@
 // ADD <SYMBOL> <ABOVE|BELOW> <THRESHOLD>
 // DEL <SYMBOL> <ABOVE|BELOW>
 
-use std::fmt::format;
-
 use serde::{Deserialize, Serialize};
 
 // TRIGGER <SYMBOL> <DIRECTION> <THRESHOLD> <CURRENT>

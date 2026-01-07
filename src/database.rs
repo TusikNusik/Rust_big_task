@@ -202,7 +202,7 @@ pub async fn buy_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quan
             .bind(user_id)
             .bind(symbol)
             .bind(quantity)
-            .bind(current_price) // Twoja cena wejścia
+            .bind(current_price * quantity as f64) // Twoja cena wejścia
             .execute(pool).await.map_err(|e| e.to_string())?;
 
         Ok(())
@@ -211,7 +211,7 @@ pub async fn buy_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quan
 
 pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, quantity: i32, stock_price: f64) -> Result<(), String> {
     
-    let stock_row = sqlx::query("SELECT quantity FROM positions WHERE user_id = ? AND symbol = ?")
+    let stock_row = sqlx::query("SELECT quantity, price_total FROM positions WHERE user_id = ? AND symbol = ?")
         .bind(user_id)
         .bind(symbol)
         .fetch_optional(pool)
@@ -235,7 +235,7 @@ pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, qua
             .execute(pool).await.map_err(|e| e.to_string())?;
     } 
     else {
-        sqlx::query("UPDATE positions SET quantity = ? AND price_total = ? WHERE user_id = ? AND symbol = ?")
+        sqlx::query("UPDATE positions SET quantity = ?, price_total = ? WHERE user_id = ? AND symbol = ?")
             .bind(new_quantity).bind(new_total_price).bind(user_id).bind(symbol)
             .execute(pool).await.map_err(|e| e.to_string())?;
     }

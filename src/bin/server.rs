@@ -250,12 +250,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             println!("[server] Network error: {}", e);
                                     }
                                 },
-                                Some(ClientMsg::LoginClient{username, password}) => {
+                                Some(ClientMsg::LoginClient{username: _, password: _}) => {
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
                                         println!("[server] Network error: {}", z);
                                     }          
                                 },
-                                Some(ClientMsg::RegisterClient{username, password}) => {
+                                Some(ClientMsg::RegisterClient{username: _, password: _}) => {
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
                                         println!("[server] Network error: {}", z);
                                     }   
