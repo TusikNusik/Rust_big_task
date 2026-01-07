@@ -213,16 +213,11 @@ pub async fn sell_stock(pool: &sqlx::SqlitePool, user_id: i64, symbol: &str, qua
     let new_quantity = current_quantity - quantity;
     let new_total_price = current_total_price - (quantity as f64 * stock_price);
 
-    if new_quantity == 0 {
-        sqlx::query("DELETE FROM positions WHERE user_id = ? AND symbol = ?")
-            .bind(user_id).bind(symbol)
-            .execute(pool).await.map_err(|e| e.to_string())?;
-    } 
-    else {
-        sqlx::query("UPDATE positions SET quantity = ?, price_total = ? WHERE user_id = ? AND symbol = ?")
-            .bind(new_quantity).bind(new_total_price).bind(user_id).bind(symbol)
-            .execute(pool).await.map_err(|e| e.to_string())?;
-    }
+    
+    sqlx::query("UPDATE positions SET quantity = ?, price_total = ? WHERE user_id = ? AND symbol = ?")
+        .bind(new_quantity).bind(new_total_price).bind(user_id).bind(symbol)
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    
 
     Ok(())
 }
