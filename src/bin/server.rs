@@ -20,7 +20,6 @@ use rust_huge_project::database;
 use rust_huge_project::protocol::AlertRequest;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions}; 
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
-use tracing_subscriber;
 use tracing::{info, error, warn};
 use anyhow::{Context, Result};
 
@@ -159,7 +158,7 @@ async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &Al
                 write_socket.flush().await?;
             }
 
-            match database::add_alert(&pool, user_id, &alert).await {
+            match database::add_alert(pool, user_id, alert).await {
                 Ok(_) => { 
                     let message = ServerMsg::AlertAdded { symbol: alert.symbol.clone(), direction: alert.direction, threshold: alert.threshold}.to_wire();
                     send_data(message, write_socket).await?;
@@ -286,10 +285,9 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             }
                                         }
                                     }
-                                    else {
-                                        if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
+                                    else if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
                                             error!("[server] Network error: {}", z);
-                                        }
+                                        
                                     }
 
                                 },
@@ -308,10 +306,9 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             error!("[server] Network error: {}", e);
                                         }
                                     } 
-                                    else {
-                                        if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
+                                    else if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
                                             error!("[server] Network error: {}", z);
-                                        }
+                                        
                                     }
                                 },
                                 Some(ClientMsg::GetAllClientData) => {
@@ -484,20 +481,4 @@ async fn main() -> Result<()> {
     }
     Ok(())
 
-}
-/*
-{"chart":
-    {"result": [
-        {"meta":
-            {"currency": "USD","symbol":"NFLX","exchangeName":"NMS","fullExchangeName":"NasdaqGS","instrumentType":"EQUITY","firstTradeDate":1022160600,"regularMarketTime":1764968400,"hasPrePostMarketData":true,"gmtoffset":-18000,"timezone":"EST","exchangeTimezoneName":"America/New_York","regularMarketPrice":100.24,"fiftyTwoWeekHigh":134.115,"fiftyTwoWeekLow":82.11,"regularMarketDayHigh":104.79,"regularMarketDayLow":97.74,"regularMarketVolume":132718362,"longName":"Netflix, Inc.","shortName":"Netflix, Inc.","chartPreviousClose":103.22,"previousClose":103.22,"scale":3,"priceHint":2,
-                "currentTradingPeriod":{
-                    "pre": {"timezone":"EST","start":1764925200,"end":1764945000,"gmtoffset":-18000},
-                    "regular":{"timezone":"EST","start":1764945000,"end":1764968400,"gmtoffset":-18000},
-                    "post":{"timezone":"EST","start":1764968400,"end":1764982800,"gmtoffset":-18000}},
-                    "tradingPeriods":[[{"timezone":"EST","start":1764945000,"end":1764968400,"gmtoffset":-18000}]],
-                    "dataGranularity":"1m","range":"1d","validRanges":["1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max"]
-                }
-
-
-
-*/  
+} 
