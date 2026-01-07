@@ -33,20 +33,7 @@ pub async fn init_database(pool: &sqlite::SqlitePool) -> Result<(), String> {
 pub async fn add_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertRequest) -> Result<(), String> {
     let dir_str = alert.direction.as_str();
 
-    let existing = sqlx::query("SELECT 1 FROM alerts WHERE user_id = ? AND symbol = ? AND direction = ? AND threshold = ? LIMIT 1")
-        .bind(user_id)
-        .bind(&alert.symbol)
-        .bind(dir_str)
-        .bind(alert.threshold)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("DB Error: {}", e))?;
-
-    if existing.is_some() {
-        return Err("Alert already exists".to_string());
-    }
-
-    let existing = sqlx::query("SELECT 1 FROM alerts WHERE user_id = ? AND symbol = ? AND direction = ? AND threshold = ? LIMIT 1")
+    let existing = sqlx::query("SELECT 1 FROM alerts WHERE user_id = ? AND symbol = ? AND direction = ? LIMIT 1")
         .bind(user_id)
         .bind(&alert.symbol)
         .bind(dir_str)
@@ -66,7 +53,7 @@ pub async fn add_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertR
         .bind(alert.threshold)
         .execute(pool)
         .await
-        .map_err(|e| format!("DB Error: {}", e))?;
+        .map_err(|e| format!("Failed to add alert: {}", e))?;
 
     println!("[database] Succesfully added new alert!");
     Ok(())
@@ -125,13 +112,13 @@ pub async fn get_user_alerts(pool: &sqlx::SqlitePool, user_id: i64) -> Result<Ve
         .bind(user_id)
         .fetch_all(pool)
         .await
-        .map_err(|e| format!("Błąd pobierania alertów: {}", e))?;
+        .map_err(|e| format!("Failed to fetch alerts: {}", e))?;
 
     let mut alerts = Vec::new();
 
     for row in rows {
         let dir_str: String = row.try_get("direction")
-            .map_err(|e| format!("Błąd odczytu kolumny direction: {}", e))?;
+            .map_err(|e| format!("Failed to read row: {}", e))?;
         
         if let Some(direction) = AlertDirection::as_msg(&dir_str) {
             alerts.push(StoredAlert {
@@ -160,7 +147,7 @@ pub async fn remove_alert(
         .bind(dir_str)
         .execute(pool)
         .await
-        .map_err(|e| format!("Błąd usuwania alertu: {}", e))?;
+        .map_err(|e| format!("Failed to remove the alert: {}", e))?;
 
     Ok(())
 }
