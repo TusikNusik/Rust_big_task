@@ -28,7 +28,7 @@ Wykorzystana funkcjonalność języka Rust:
 ## Klient
 Klient konsolowy łączy się z serwerem po TCP i pozwala użytkownikowi zarządzać alertami oraz portfelem. Umożliwia logowanie i rejestrację, dodawanie/usuwanie alertów, sprawdzanie ceny akcji, kupno i sprzedaż, a także pobieranie danych o alertach i posiadanych pozycjach. Jednocześnie wyświetla komunikaty zwrotne z serwera, w tym powiadomienia o spełnionych alertach.
 ## GUI 
-Aplikacja desktopowa zbudowana w `eframe/egui`. Pozwala na łączenie z serwerem, logowanie/rejestrację, zarządzanie alertami, podgląd portfela oraz wysyłanie poleceń BUY/SELL/PRICE. Dla alertów wyświetla okno popup i emituje dźwięk. Wyświetlany jest tylko ostatni popup aby w przypadku wielu na raz użytkownik nie musiał wszystkich usuwać, a informacje o wszystkich innych alertach jest w logu.
+Aplikacja desktopowa zbudowana w `eframe/egui`. Pozwala na łączenie z serwerem, logowanie/rejestrację, zarządzanie alertami, podgląd portfela oraz wysyłanie poleceń BUY/SELL/PRICE. Dla alertów wyświetla okno popup i emituje dźwięk. Wyświetlany jest tylko ostatni popup aby w przypadku wielu na raz użytkownik nie musiał wszystkich usuwać, a informacje o wszystkich innych alertach są w logu.
 ## Protocol
 Prosty protokół tekstowy, oparty o pojedyncze linie zakończone `\n`. Klient wysyła komendy: `ADD`, `DEL`, `LOGIN`, `REGISTER`, `PRICE`, `BUY`, `SELL`, `DATA`. Serwer wysyła komendy: `TRIGGER`, `ALERTADDED`, `ALERTDELETED`, `PRICE`, `BOUGHT`, `SOLD`, `DATA`, `LOGIN`, `REGISTER`, `ERR`.
 ## Test
