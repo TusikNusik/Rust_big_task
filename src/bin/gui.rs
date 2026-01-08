@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use rust_huge_project::database::PortfolioStock;
 use rust_huge_project::protocol::{
@@ -23,30 +23,73 @@ fn main() -> eframe::Result<()> {
 
 #[derive(Debug, Clone)]
 enum UiCommand {
-    Connect { addr: String },
+    Connect {
+        addr: String,
+    },
     Disconnect,
-    AddAlert { symbol: String, dir: AlertDirection, threshold: f64 },
-    RemoveAlert { symbol: String, dir: AlertDirection },
-    LoginClient { username: String, password: String },
-    RegisterClient { username: String, password: String },
-    CheckPrice { symbol: String },
-    BuyStock { symbol: String, quantity: i32 },
-    SellStock { symbol: String, quantity: i32 },
+    AddAlert {
+        symbol: String,
+        dir: AlertDirection,
+        threshold: f64,
+    },
+    RemoveAlert {
+        symbol: String,
+        dir: AlertDirection,
+    },
+    LoginClient {
+        username: String,
+        password: String,
+    },
+    RegisterClient {
+        username: String,
+        password: String,
+    },
+    CheckPrice {
+        symbol: String,
+    },
+    BuyStock {
+        symbol: String,
+        quantity: i32,
+    },
+    SellStock {
+        symbol: String,
+        quantity: i32,
+    },
     GetAllClientData,
 }
 
 #[derive(Debug, Clone)]
 enum ClientEvent {
     Connected,
-    Disconnected { reason: String },
-    AlertTriggered { symbol: String, dir: AlertDirection, threshold: f64, current: f64 },
-    AlertAdded { symbol: String, dir: AlertDirection, threshold: f64 },
-    AlertRemoved { symbol: String, dir: AlertDirection },
-    AllClientData { stocks: Vec<PortfolioStock>, alerts: Vec<AlertRow> },
+    Disconnected {
+        reason: String,
+    },
+    AlertTriggered {
+        symbol: String,
+        dir: AlertDirection,
+        threshold: f64,
+        current: f64,
+    },
+    AlertAdded {
+        symbol: String,
+        dir: AlertDirection,
+        threshold: f64,
+    },
+    AlertRemoved {
+        symbol: String,
+        dir: AlertDirection,
+    },
+    AllClientData {
+        stocks: Vec<PortfolioStock>,
+        alerts: Vec<AlertRow>,
+    },
     UserLogged,
     UserRegistered,
     ServerError(String),
-    PriceChecked { symbol: String, price: f64},
+    PriceChecked {
+        symbol: String,
+        price: f64,
+    },
     Log(String),
 }
 
@@ -64,39 +107,35 @@ fn network_thread(cmd_rx: Receiver<UiCommand>, ev_tx: Sender<ClientEvent>) {
 
     loop {
         match &mut state {
-            NetState::Disconnected => {
-                match cmd_rx.recv() {
-                    Ok(UiCommand::Connect { addr }) => {
-                        match TcpStream::connect(&addr) {
-                            Ok(stream) => {
-                                let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                                let _ = stream.set_nodelay(true);
+            NetState::Disconnected => match cmd_rx.recv() {
+                Ok(UiCommand::Connect { addr }) => match TcpStream::connect(&addr) {
+                    Ok(stream) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                        let _ = stream.set_nodelay(true);
 
-                                let reader = match stream.try_clone() {
-                                    Ok(s) => BufReader::new(s),
-                                    Err(e) => {
-                                        let _ = ev_tx.send(ClientEvent::Disconnected {
-                                            reason: format!("try_clone failed: {e}"),
-                                        });
-                                        continue;
-                                    }
-                                };
-
-                                state = NetState::Connected { stream, reader };
-                                let _ = ev_tx.send(ClientEvent::Connected);
-                                let _ = ev_tx.send(ClientEvent::Log("Connected.".into()));
-                            }
+                        let reader = match stream.try_clone() {
+                            Ok(s) => BufReader::new(s),
                             Err(e) => {
                                 let _ = ev_tx.send(ClientEvent::Disconnected {
-                                    reason: format!("connect failed: {e}"),
+                                    reason: format!("try_clone failed: {e}"),
                                 });
+                                continue;
                             }
-                        }
+                        };
+
+                        state = NetState::Connected { stream, reader };
+                        let _ = ev_tx.send(ClientEvent::Connected);
+                        let _ = ev_tx.send(ClientEvent::Log("Connected.".into()));
                     }
-                    Ok(_) => {}
-                    Err(_) => break,
-                }
-            }
+                    Err(e) => {
+                        let _ = ev_tx.send(ClientEvent::Disconnected {
+                            reason: format!("connect failed: {e}"),
+                        });
+                    }
+                },
+                Ok(_) => {}
+                Err(_) => break,
+            },
 
             NetState::Connected { stream, reader } => {
                 match cmd_rx.recv_timeout(Duration::from_millis(25)) {
@@ -119,7 +158,9 @@ fn network_thread(cmd_rx: Receiver<UiCommand>, ev_tx: Sender<ClientEvent>) {
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        if e.kind() != io::ErrorKind::WouldBlock && e.kind() != io::ErrorKind::TimedOut {
+                        if e.kind() != io::ErrorKind::WouldBlock
+                            && e.kind() != io::ErrorKind::TimedOut
+                        {
                             state = NetState::Disconnected;
                             let _ = ev_tx.send(ClientEvent::Disconnected {
                                 reason: format!("server read failed: {e}"),
@@ -156,7 +197,11 @@ fn handle_command_connected(
 
         UiCommand::Connect { .. } => Ok(()),
 
-        UiCommand::AddAlert { symbol, dir, threshold } => {
+        UiCommand::AddAlert {
+            symbol,
+            dir,
+            threshold,
+        } => {
             let msg = ClientMsg::AddAlert(AlertRequest {
                 symbol,
                 direction: dir,
@@ -224,7 +269,10 @@ fn handle_command_connected(
 fn read_one_line(reader: &mut BufReader<TcpStream>) -> io::Result<Option<String>> {
     let mut s = String::new();
     match reader.read_line(&mut s) {
-        Ok(0) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "server closed")),
+        Ok(0) => Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "server closed",
+        )),
         Ok(_) => Ok(Some(s.trim_end().to_string())),
         Err(e) => Err(e),
     }
@@ -232,7 +280,12 @@ fn read_one_line(reader: &mut BufReader<TcpStream>) -> io::Result<Option<String>
 
 fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
     match parse_server_msg(line) {
-        Some(ServerMsg::AlertTriggered { symbol, direction, threshold, current_price }) => {
+        Some(ServerMsg::AlertTriggered {
+            symbol,
+            direction,
+            threshold,
+            current_price,
+        }) => {
             let _ = ev_tx.send(ClientEvent::AlertTriggered {
                 symbol,
                 dir: direction,
@@ -240,7 +293,11 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
                 current: current_price.value,
             });
         }
-        Some(ServerMsg::AlertAdded { symbol, direction, threshold }) => {
+        Some(ServerMsg::AlertAdded {
+            symbol,
+            direction,
+            threshold,
+        }) => {
             let _ = ev_tx.send(ClientEvent::AlertAdded {
                 symbol,
                 dir: direction,
@@ -261,7 +318,7 @@ fn handle_server_line(line: &str, ev_tx: &Sender<ClientEvent>) {
             let msg = format!("Sold {quantity}x {symbol}");
             let _ = ev_tx.send(ClientEvent::Log(msg));
         }
-        Some(ServerMsg::PriceChecked{ symbol, price}) => {
+        Some(ServerMsg::PriceChecked { symbol, price }) => {
             let _ = ev_tx.send(ClientEvent::PriceChecked { symbol, price });
         }
         Some(ServerMsg::AllClientData { stocks, alerts }) => {
@@ -428,7 +485,12 @@ impl App {
                     self.auth_notice = Some("Disconnected from server.".into());
                     self.push_log(LogKind::Error, format!("Disconnected: {reason}"));
                 }
-                ClientEvent::AlertTriggered { symbol, dir, threshold, current } => {
+                ClientEvent::AlertTriggered {
+                    symbol,
+                    dir,
+                    threshold,
+                    current,
+                } => {
                     self.alert_popup_message = Some(format!(
                         "[ALERT] {symbol} {:?} threshold={threshold} current={current}",
                         dir
@@ -442,12 +504,24 @@ impl App {
                     play_alert_sound();
                     self.push_log(
                         LogKind::Alert,
-                        format!("[ALERT] {symbol} {:?} threshold={threshold} current={current}", dir),
+                        format!(
+                            "[ALERT] {symbol} {:?} threshold={threshold} current={current}",
+                            dir
+                        ),
                     );
                 }
-                ClientEvent::AlertAdded { symbol, dir, threshold } => {
-                    let popup_msg = format!("Alert added: {symbol} {:?} threshold={threshold}", dir);
-                    if !self.alerts.iter().any(|a| a.symbol == symbol && a.dir == dir) {
+                ClientEvent::AlertAdded {
+                    symbol,
+                    dir,
+                    threshold,
+                } => {
+                    let popup_msg =
+                        format!("Alert added: {symbol} {:?} threshold={threshold}", dir);
+                    if !self
+                        .alerts
+                        .iter()
+                        .any(|a| a.symbol == symbol && a.dir == dir)
+                    {
                         self.alerts.push(AlertRow {
                             symbol: symbol.clone(),
                             dir,
@@ -471,46 +545,49 @@ impl App {
                     self.push_log(LogKind::Info, format!("Alert removed: {symbol} {:?}", dir));
                 }
                 ClientEvent::PriceChecked { symbol, price } => {
-                    if let Some(pending) = self.pending_trade.clone() {
-                        if pending.symbol == symbol {
-                            self.pending_trade = None;
-                            match pending.kind {
-                                TradeKind::Buy => {
-                                    self.send(UiCommand::BuyStock {
-                                        symbol: pending.symbol.clone(),
-                                        quantity: pending.quantity,
-                                    });
-                                    self.push_log(
-                                        LogKind::Info,
-                                        format!(
-                                            "[BUY] {symbol} qty={} price={price}",
-                                            pending.quantity
-                                        ),
-                                    );
-                                }
-                                TradeKind::Sell => {
-                                    self.send(UiCommand::SellStock {
-                                        symbol: pending.symbol.clone(),
-                                        quantity: pending.quantity,
-                                    });
-                                    self.push_log(
-                                        LogKind::Info,
-                                        format!(
-                                            "[SELL] {symbol} qty={} price={price}",
-                                            pending.quantity
-                                        ),
-                                    );
-                                }
+                    if let Some(pending) = self.pending_trade.clone()
+                        && pending.symbol == symbol
+                    {
+                        self.pending_trade = None;
+                        match pending.kind {
+                            TradeKind::Buy => {
+                                self.send(UiCommand::BuyStock {
+                                    symbol: pending.symbol.clone(),
+                                    quantity: pending.quantity,
+                                });
+                                self.push_log(
+                                    LogKind::Info,
+                                    format!(
+                                        "[BUY] {symbol} qty={} price={price}",
+                                        pending.quantity
+                                    ),
+                                );
                             }
-                            return;
+                            TradeKind::Sell => {
+                                self.send(UiCommand::SellStock {
+                                    symbol: pending.symbol.clone(),
+                                    quantity: pending.quantity,
+                                });
+                                self.push_log(
+                                    LogKind::Info,
+                                    format!(
+                                        "[SELL] {symbol} qty={} price={price}",
+                                        pending.quantity
+                                    ),
+                                );
+                            }
                         }
+                        return;
                     }
                     self.push_log(LogKind::Info, format!("[PRICE] {symbol} price={price}"));
                 }
                 ClientEvent::AllClientData { stocks, alerts } => {
                     let mut deduped = Vec::new();
                     for alert in alerts {
-                        if !deduped.iter().any(|a: &AlertRow| a.symbol == alert.symbol && a.dir == alert.dir) {
+                        if !deduped
+                            .iter()
+                            .any(|a: &AlertRow| a.symbol == alert.symbol && a.dir == alert.dir)
+                        {
                             deduped.push(alert);
                         }
                     }
@@ -560,7 +637,8 @@ impl App {
     }
 
     fn remove_local_alert(&mut self, symbol: &str, dir: AlertDirection) {
-        self.alerts.retain(|row| !(row.symbol == symbol && row.dir == dir));
+        self.alerts
+            .retain(|row| !(row.symbol == symbol && row.dir == dir));
     }
 
     fn render_auth_screen(&mut self, ui: &mut egui::Ui) {
@@ -590,7 +668,10 @@ impl App {
             AuthMode::Register => "Register",
         };
         let auth_enabled = self.connected;
-        if ui.add_enabled(auth_enabled, egui::Button::new(action_label)).clicked() {
+        if ui
+            .add_enabled(auth_enabled, egui::Button::new(action_label))
+            .clicked()
+        {
             let username = self.username_input.trim().to_string();
             let password = self.password_input.trim().to_string();
             self.auth_notice = Some("Waiting for server response...".into());
@@ -625,11 +706,31 @@ impl App {
                             CommandKind::SellStock => "SELL",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.command_kind, CommandKind::AddAlert, "ADD");
-                            ui.selectable_value(&mut self.command_kind, CommandKind::RemoveAlert, "DEL");
-                            ui.selectable_value(&mut self.command_kind, CommandKind::CheckPrice, "PRICE");
-                            ui.selectable_value(&mut self.command_kind, CommandKind::BuyStock, "BUY");
-                            ui.selectable_value(&mut self.command_kind, CommandKind::SellStock, "SELL");
+                            ui.selectable_value(
+                                &mut self.command_kind,
+                                CommandKind::AddAlert,
+                                "ADD",
+                            );
+                            ui.selectable_value(
+                                &mut self.command_kind,
+                                CommandKind::RemoveAlert,
+                                "DEL",
+                            );
+                            ui.selectable_value(
+                                &mut self.command_kind,
+                                CommandKind::CheckPrice,
+                                "PRICE",
+                            );
+                            ui.selectable_value(
+                                &mut self.command_kind,
+                                CommandKind::BuyStock,
+                                "BUY",
+                            );
+                            ui.selectable_value(
+                                &mut self.command_kind,
+                                CommandKind::SellStock,
+                                "SELL",
+                            );
                         });
                 });
 
@@ -648,8 +749,16 @@ impl App {
                                     AlertDirection::Below => "BELOW",
                                 })
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
-                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
+                                    ui.selectable_value(
+                                        &mut self.dir_input,
+                                        AlertDirection::Above,
+                                        "ABOVE",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.dir_input,
+                                        AlertDirection::Below,
+                                        "BELOW",
+                                    );
                                 });
                         });
 
@@ -661,13 +770,23 @@ impl App {
                         ui.add_space(8.0);
 
                         let add_enabled = self.connected;
-                        if ui.add_enabled(add_enabled, egui::Button::new("Send")).clicked() {
+                        if ui
+                            .add_enabled(add_enabled, egui::Button::new("Send"))
+                            .clicked()
+                        {
                             let symbol = self.normalize_symbol();
                             let threshold = self.threshold_input.trim().parse::<f64>();
                             match threshold {
                                 Ok(th) => {
-                                    if self.alerts.iter().any(|a| a.symbol == symbol && a.dir == self.dir_input) {
-                                        self.push_log(LogKind::Error, "Alert for this symbol and direction already exists.");
+                                    if self
+                                        .alerts
+                                        .iter()
+                                        .any(|a| a.symbol == symbol && a.dir == self.dir_input)
+                                    {
+                                        self.push_log(
+                                            LogKind::Error,
+                                            "Alert for this symbol and direction already exists.",
+                                        );
                                         return;
                                     }
                                     self.send(UiCommand::AddAlert {
@@ -677,7 +796,10 @@ impl App {
                                     });
                                 }
                                 Err(_) => {
-                                    self.push_log(LogKind::Error, "Invalid threshold (expected number).");
+                                    self.push_log(
+                                        LogKind::Error,
+                                        "Invalid threshold (expected number).",
+                                    );
                                 }
                             }
                         }
@@ -696,15 +818,26 @@ impl App {
                                     AlertDirection::Below => "BELOW",
                                 })
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Above, "ABOVE");
-                                    ui.selectable_value(&mut self.dir_input, AlertDirection::Below, "BELOW");
+                                    ui.selectable_value(
+                                        &mut self.dir_input,
+                                        AlertDirection::Above,
+                                        "ABOVE",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.dir_input,
+                                        AlertDirection::Below,
+                                        "BELOW",
+                                    );
                                 });
                         });
 
                         ui.add_space(8.0);
 
                         let del_enabled = self.connected;
-                        if ui.add_enabled(del_enabled, egui::Button::new("Send")).clicked() {
+                        if ui
+                            .add_enabled(del_enabled, egui::Button::new("Send"))
+                            .clicked()
+                        {
                             let symbol = self.normalize_symbol();
                             self.send(UiCommand::RemoveAlert {
                                 symbol: symbol.clone(),
@@ -722,7 +855,10 @@ impl App {
                         ui.add_space(8.0);
 
                         let price_enabled = self.connected;
-                        if ui.add_enabled(price_enabled, egui::Button::new("Send")).clicked() {
+                        if ui
+                            .add_enabled(price_enabled, egui::Button::new("Send"))
+                            .clicked()
+                        {
                             let symbol = self.normalize_symbol();
                             self.send(UiCommand::CheckPrice { symbol });
                         }
@@ -741,7 +877,10 @@ impl App {
                         ui.add_space(8.0);
 
                         let buy_enabled = self.connected;
-                        if ui.add_enabled(buy_enabled, egui::Button::new("Send")).clicked() {
+                        if ui
+                            .add_enabled(buy_enabled, egui::Button::new("Send"))
+                            .clicked()
+                        {
                             let symbol = self.normalize_symbol();
                             let quantity = self.quantity_input.trim().parse::<i32>();
                             match quantity {
@@ -754,7 +893,10 @@ impl App {
                                     self.send(UiCommand::CheckPrice { symbol });
                                 }
                                 Err(_) => {
-                                    self.push_log(LogKind::Error, "Invalid quantity (expected number).");
+                                    self.push_log(
+                                        LogKind::Error,
+                                        "Invalid quantity (expected number).",
+                                    );
                                 }
                             }
                         }
@@ -773,7 +915,10 @@ impl App {
                         ui.add_space(8.0);
 
                         let sell_enabled = self.connected;
-                        if ui.add_enabled(sell_enabled, egui::Button::new("Send")).clicked() {
+                        if ui
+                            .add_enabled(sell_enabled, egui::Button::new("Send"))
+                            .clicked()
+                        {
                             let symbol = self.normalize_symbol();
                             let quantity = self.quantity_input.trim().parse::<i32>();
                             match quantity {
@@ -786,7 +931,10 @@ impl App {
                                     self.send(UiCommand::CheckPrice { symbol });
                                 }
                                 Err(_) => {
-                                    self.push_log(LogKind::Error, "Invalid quantity (expected number).");
+                                    self.push_log(
+                                        LogKind::Error,
+                                        "Invalid quantity (expected number).",
+                                    );
                                 }
                             }
                         }
@@ -802,7 +950,10 @@ impl App {
                 ui.heading("Active alerts");
                 if self.authenticated {
                     let refresh_enabled = self.connected;
-                    if ui.add_enabled(refresh_enabled, egui::Button::new("Refresh data")).clicked() {
+                    if ui
+                        .add_enabled(refresh_enabled, egui::Button::new("Refresh data"))
+                        .clicked()
+                    {
                         self.send(UiCommand::GetAllClientData);
                     }
                     ui.add_space(6.0);
@@ -815,24 +966,27 @@ impl App {
                         .id_source("alerts_scroll")
                         .max_height(240.0)
                         .show(ui, |ui| {
-                        for (idx, a) in self.alerts.clone().into_iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                ui.label(format!("{} {:?} {}", a.symbol, a.dir, a.threshold));
+                            for (idx, a) in self.alerts.clone().into_iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{} {:?} {}", a.symbol, a.dir, a.threshold));
 
-                                let del_enabled = self.connected;
-                                if ui.add_enabled(del_enabled, egui::Button::new("Del")).clicked() {
-                                    self.send(UiCommand::RemoveAlert {
-                                        symbol: a.symbol.clone(),
-                                        dir: a.dir,
-                                    });
-                                    if idx < self.alerts.len() {
-                                        self.alerts.remove(idx);
+                                    let del_enabled = self.connected;
+                                    if ui
+                                        .add_enabled(del_enabled, egui::Button::new("Del"))
+                                        .clicked()
+                                    {
+                                        self.send(UiCommand::RemoveAlert {
+                                            symbol: a.symbol.clone(),
+                                            dir: a.dir,
+                                        });
+                                        if idx < self.alerts.len() {
+                                            self.alerts.remove(idx);
+                                        }
                                     }
-                                }
-                            });
-                            ui.separator();
-                        }
-                    });
+                                });
+                                ui.separator();
+                            }
+                        });
                 }
             });
 
@@ -846,19 +1000,19 @@ impl App {
                         .id_source("portfolio_scroll")
                         .max_height(240.0)
                         .show(ui, |ui| {
-                        for stock in &self.portfolio {
-                            let (amount_label, amount_value) = if stock.total_price >= 0.0 {
-                                ("spent", stock.total_price)
-                            } else {
-                                ("earned", -stock.total_price)
-                            };
-                            ui.label(format!(
-                                "{} quantity={} {} {:.3}",
-                                stock.symbol, stock.quantity, amount_label, amount_value
-                            ));
-                            ui.separator();
-                        }
-                    });
+                            for stock in &self.portfolio {
+                                let (amount_label, amount_value) = if stock.total_price >= 0.0 {
+                                    ("spent", stock.total_price)
+                                } else {
+                                    ("earned", -stock.total_price)
+                                };
+                                ui.label(format!(
+                                    "{} quantity={} {} {:.3}",
+                                    stock.symbol, stock.quantity, amount_label, amount_value
+                                ));
+                                ui.separator();
+                            }
+                        });
                 }
             });
         });
@@ -886,10 +1040,8 @@ impl eframe::App for App {
                         self.push_log(LogKind::Info, format!("Connecting to {addr}..."));
                         self.send(UiCommand::Connect { addr });
                     }
-                } else {
-                    if ui.button("Disconnect").clicked() {
-                        self.send(UiCommand::Disconnect);
-                    }
+                } else if ui.button("Disconnect").clicked() {
+                    self.send(UiCommand::Disconnect);
                 }
 
                 ui.separator();
@@ -915,16 +1067,24 @@ impl eframe::App for App {
                 ui.label(format!("{} entries", self.logs.len()));
             });
 
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                for row in &self.logs {
-                    let prefix = format!("[{}] ", row.ts);
-                    match row.kind {
-                        LogKind::Info => ui.label(format!("{prefix}{}", row.msg)),
-                        LogKind::Error => ui.colored_label(egui::Color32::LIGHT_RED, format!("{prefix}{}", row.msg)),
-                        LogKind::Alert => ui.colored_label(egui::Color32::LIGHT_YELLOW, format!("{prefix}{}", row.msg)),
-                    };
-                }
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for row in &self.logs {
+                        let prefix = format!("[{}] ", row.ts);
+                        match row.kind {
+                            LogKind::Info => ui.label(format!("{prefix}{}", row.msg)),
+                            LogKind::Error => ui.colored_label(
+                                egui::Color32::LIGHT_RED,
+                                format!("{prefix}{}", row.msg),
+                            ),
+                            LogKind::Alert => ui.colored_label(
+                                egui::Color32::LIGHT_YELLOW,
+                                format!("{prefix}{}", row.msg),
+                            ),
+                        };
+                    }
+                });
         });
 
         if self.alert_popup_open {
@@ -981,13 +1141,16 @@ fn configure_dashboard_light_style(ctx: &egui::Context) {
     style.visuals.selection.bg_fill = egui::Color32::from_rgb(26, 110, 192);
     style.visuals.hyperlink_color = egui::Color32::from_rgb(20, 120, 200);
     style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(246, 249, 252);
-    style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 45, 55));
+    style.visuals.widgets.inactive.fg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 45, 55));
     style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(220, 234, 248);
     style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(200, 224, 246);
-    style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.2, egui::Color32::from_rgb(25, 35, 45));
+    style.visuals.widgets.active.fg_stroke =
+        egui::Stroke::new(1.2, egui::Color32::from_rgb(25, 35, 45));
     style.visuals.window_rounding = egui::Rounding::same(10.0);
     style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(236, 242, 248);
-    style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 65, 75));
+    style.visuals.widgets.noninteractive.fg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 65, 75));
 
     style.spacing.button_padding = egui::vec2(12.0, 8.0);
     style.spacing.item_spacing = egui::vec2(10.0, 10.0);
@@ -1015,7 +1178,10 @@ fn configure_dashboard_light_style(ctx: &egui::Context) {
 
 fn now_hhmmss() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let s = secs % 60;
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;

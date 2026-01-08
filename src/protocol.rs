@@ -220,10 +220,7 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
             let symbol = parts.next()?.to_string();
             let direction = AlertDirection::as_msg(parts.next()?)?;
 
-            Some(ServerMsg::AlertRemoved {
-                symbol,
-                direction,
-            })
+            Some(ServerMsg::AlertRemoved { symbol, direction })
         }
 
         CMD_PRICE => {
@@ -262,13 +259,9 @@ pub fn parse_server_msg(line: &str) -> Option<ServerMsg> {
             Some(ServerMsg::StockSold { symbol, quantity })
         }
 
-        CMD_LOGIN => {
-            Some(ServerMsg::UserLogged)
-        }
+        CMD_LOGIN => Some(ServerMsg::UserLogged),
 
-        CMD_REGISTER => {
-            Some(ServerMsg::UserRegistered)
-        }
+        CMD_REGISTER => Some(ServerMsg::UserRegistered),
 
         CMD_ERR => {
             let rest = parts.collect::<Vec<_>>().join(" ");
@@ -308,45 +301,42 @@ pub fn parse_client_msg(line: &str) -> Option<ClientMsg> {
 
             Some(ClientMsg::RemoveAlert { symbol, direction })
         }
-        
+
         CMD_LOGIN => {
             let username = parts.next()?.to_string();
             let password = parts.next()?.to_string();
 
             Some(ClientMsg::LoginClient { username, password })
-        },
-
+        }
 
         CMD_REGISTER => {
             let username = parts.next()?.to_string();
             let password = parts.next()?.to_string();
 
             Some(ClientMsg::RegisterClient { username, password })
-        },
+        }
 
         CMD_PRICE => {
             let symbol = parts.next()?.to_string();
 
             Some(ClientMsg::CheckPrice { symbol })
-        },
+        }
 
         CMD_BUY => {
             let symbol = parts.next()?.to_string();
             let quantity: i32 = parts.next()?.parse().ok()?;
 
             Some(ClientMsg::BuyStock { symbol, quantity })
-        },
-        
+        }
+
         CMD_SELL => {
             let symbol = parts.next()?.to_string();
             let quantity: i32 = parts.next()?.parse().ok()?;
 
             Some(ClientMsg::SellStock { symbol, quantity })
-        },
+        }
 
-        CMD_DATA => {
-            Some(ClientMsg::GetAllClientData)
-        },
+        CMD_DATA => Some(ClientMsg::GetAllClientData),
 
         _ => None,
     }
@@ -378,17 +368,21 @@ impl ServerMsg {
                 threshold
             ),
 
-            ServerMsg::AlertRemoved { symbol, direction} => format!(
-                "{CMD_ALERT_DELETED} {} {}\n",
-                symbol,
-                direction.as_str()
-            ),
+            ServerMsg::AlertRemoved { symbol, direction } => {
+                format!("{CMD_ALERT_DELETED} {} {}\n", symbol, direction.as_str())
+            }
 
-            ServerMsg::PriceChecked { symbol, price } => format!("{CMD_PRICE} {} {}\n", symbol, price),
+            ServerMsg::PriceChecked { symbol, price } => {
+                format!("{CMD_PRICE} {} {}\n", symbol, price)
+            }
 
-            ServerMsg::StockBought { symbol, quantity } => format!("{CMD_BOUGHT} {} {}\n", symbol, quantity),
+            ServerMsg::StockBought { symbol, quantity } => {
+                format!("{CMD_BOUGHT} {} {}\n", symbol, quantity)
+            }
 
-            ServerMsg::StockSold { symbol, quantity } => format!("{CMD_SOLD} {} {}\n", symbol, quantity),
+            ServerMsg::StockSold { symbol, quantity } => {
+                format!("{CMD_SOLD} {} {}\n", symbol, quantity)
+            }
 
             ServerMsg::Error(msg) => {
                 format!("{CMD_ERR} {}\n", msg)
@@ -407,7 +401,6 @@ impl ServerMsg {
 
             ServerMsg::UserLogged => format!("{CMD_LOGIN}\n"),
             ServerMsg::UserRegistered => format!("{CMD_REGISTER}\n"),
-
         }
     }
 }

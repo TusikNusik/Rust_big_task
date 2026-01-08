@@ -1,45 +1,43 @@
-use std::time::Duration;
-use reqwest::header::USER_AGENT;
 use reqwest::header::ACCEPT;
-use rust_huge_project::protocol::Price;
-use sqlx::sqlite;
-use tokio::io;
-use tokio::net::{TcpListener, TcpStream};
-use serde::{Deserialize};
-use std::collections::HashMap;
-use std::sync::{Arc};
-use tokio::sync::RwLock;
-use std::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use rust_huge_project::protocol::parse_client_msg;
-use tokio::net::tcp::OwnedWriteHalf;
-use rust_huge_project::protocol::{
-    AlertDirection, ClientMsg, ServerMsg,
-};
+use reqwest::header::USER_AGENT;
 use rust_huge_project::database;
 use rust_huge_project::protocol::AlertRequest;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteConnectOptions}; 
+use rust_huge_project::protocol::Price;
+use rust_huge_project::protocol::parse_client_msg;
+use rust_huge_project::protocol::{AlertDirection, ClientMsg, ServerMsg};
+use serde::Deserialize;
+use sqlx::sqlite;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use std::collections::HashMap;
+use std::fs;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 type MapLock = Arc<RwLock<HashMap<String, f64>>>;
-use tracing::{info, error, warn};
 use anyhow::{Context, Result};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize)]
 struct YahooResponse {
-    chart : Chart
+    chart: Chart,
 }
 
 #[derive(Debug, Deserialize)]
 struct Chart {
-    result : Vec<ChartResult>,
+    result: Vec<ChartResult>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChartResult {
-    meta : Meta,
+    meta: Meta,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")] 
+#[serde(rename_all = "camelCase")]
 struct Meta {
     currency: String,
     symbol: String,
@@ -56,7 +54,7 @@ fn read_all_stocks() -> Vec<String> {
         .collect()
 }
 
-async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(), reqwest::Error> {
+async fn scrap_stocks(stock_map: MapLock, all_stocks: Vec<String>) -> Result<(), reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?;
@@ -70,8 +68,12 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
         for i in &all_stocks {
             let url = format!("{}{}", url_base, i);
 
-            let request = client.get(url)
-                .header(USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+            let request = client
+                .get(url)
+                .header(
+                    USER_AGENT,
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                )
                 .header(ACCEPT, "application/json")
                 .send()
                 .await;
@@ -79,29 +81,37 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
             match request {
                 Ok(request) => {
                     if request.status().is_success() {
-                        let yahoo_response : Result<YahooResponse, _> = request.json().await;
+                        let yahoo_response: Result<YahooResponse, _> = request.json().await;
                         match yahoo_response {
                             Ok(yahoo_response) => {
                                 let yahoo_chart = yahoo_response.chart;
 
                                 if let Some(stock_data) = yahoo_chart.result.first() {
-                                    info!("[server scrapper] Stock symbol and currency: {} {}", stock_data.meta.symbol, stock_data.meta.currency);
-                                    info!("[server scrapper] Stock price {}", stock_data.meta.regular_market_price);
-                                    temp_map.insert(stock_data.meta.symbol.clone(), stock_data.meta.regular_market_price);
+                                    info!(
+                                        "[server scrapper] Stock symbol and currency: {} {}",
+                                        stock_data.meta.symbol, stock_data.meta.currency
+                                    );
+                                    info!(
+                                        "[server scrapper] Stock price {}",
+                                        stock_data.meta.regular_market_price
+                                    );
+                                    temp_map.insert(
+                                        stock_data.meta.symbol.clone(),
+                                        stock_data.meta.regular_market_price,
+                                    );
                                 }
                             }
-                            Err(error) => error!("[server scrapper] Failed Json convertion: {}", error)
+                            Err(error) => {
+                                error!("[server scrapper] Failed Json convertion: {}", error)
+                            }
                         }
-                    }
-                    else {
+                    } else {
                         warn!("[server scrapper] Request not succesfull!");
                     }
                 }
-                Err(error) => warn!("[server scrapper] Scrapping network error: {}", error)
-
+                Err(error) => warn!("[server scrapper] Scrapping network error: {}", error),
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
-            
         }
 
         if !temp_map.is_empty() {
@@ -116,7 +126,7 @@ async fn scrap_stocks(stock_map : MapLock, all_stocks : Vec<String>) -> Result<(
     }
 }
 
-async fn client_errors(error_message : &str, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn client_errors(error_message: &str, write_socket: &mut OwnedWriteHalf) -> io::Result<()> {
     let message = ServerMsg::Error(error_message.to_string()).to_wire();
     write_socket.write_all(message.as_bytes()).await?;
     write_socket.flush().await?;
@@ -124,26 +134,38 @@ async fn client_errors(error_message : &str, write_socket :&mut OwnedWriteHalf) 
     Ok(())
 }
 
-async fn check_price(stock : &str, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn check_price(
+    stock: &str,
+    map_pointer: &MapLock,
+    write_socket: &mut OwnedWriteHalf,
+) -> io::Result<()> {
     let access = map_pointer.read().await;
-    
+
     match access.get(stock) {
         Some(current_value) => {
-            let message = ServerMsg::PriceChecked { symbol: stock.to_string(), price: *current_value}.to_wire();
+            let message = ServerMsg::PriceChecked {
+                symbol: stock.to_string(),
+                price: *current_value,
+            }
+            .to_wire();
             write_socket.write_all(message.as_bytes()).await?;
             write_socket.flush().await?;
-            
-        },
+        }
         None => {
             client_errors("Stock not available!", write_socket).await?;
         }
     }
-    
+
     Ok(())
-                
 }
 
-async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &AlertRequest, map_pointer : &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn prepare_new_alert(
+    pool: &sqlite::SqlitePool,
+    user_id: i64,
+    alert: &AlertRequest,
+    map_pointer: &MapLock,
+    write_socket: &mut OwnedWriteHalf,
+) -> io::Result<()> {
     let access = map_pointer.read().await;
 
     match access.get(&alert.symbol) {
@@ -153,21 +175,34 @@ async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &Al
                 AlertDirection::Below => *current_value < alert.threshold,
             };
             if triggered {
-                let message = ServerMsg::AlertTriggered { symbol: alert.symbol.clone(), direction: alert.direction, threshold: alert.threshold, current_price: Price { value: *current_value } }.to_wire();
+                let message = ServerMsg::AlertTriggered {
+                    symbol: alert.symbol.clone(),
+                    direction: alert.direction,
+                    threshold: alert.threshold,
+                    current_price: Price {
+                        value: *current_value,
+                    },
+                }
+                .to_wire();
                 write_socket.write_all(message.as_bytes()).await?;
                 write_socket.flush().await?;
             }
 
             match database::add_alert(pool, user_id, alert).await {
-                Ok(_) => { 
-                    let message = ServerMsg::AlertAdded { symbol: alert.symbol.clone(), direction: alert.direction, threshold: alert.threshold}.to_wire();
+                Ok(_) => {
+                    let message = ServerMsg::AlertAdded {
+                        symbol: alert.symbol.clone(),
+                        direction: alert.direction,
+                        threshold: alert.threshold,
+                    }
+                    .to_wire();
                     send_data(message, write_socket).await?;
-                },
+                }
                 Err(e) => {
                     client_errors(&e, write_socket).await?;
                 }
             }
-        },
+        }
         None => {
             client_errors("Stock not available!", write_socket).await?;
         }
@@ -175,20 +210,25 @@ async fn prepare_new_alert(pool: &sqlite::SqlitePool, user_id : i64, alert : &Al
     Ok(())
 }
 
-async fn check_price_of_stock(map_pointer: &MapLock, stock: &str) -> Option<f64>{
+async fn check_price_of_stock(map_pointer: &MapLock, stock: &str) -> Option<f64> {
     let access = map_pointer.read().await;
 
     access.get(stock).copied()
 }
 
-async fn send_data(message: String, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn send_data(message: String, write_socket: &mut OwnedWriteHalf) -> io::Result<()> {
     write_socket.write_all(message.as_bytes()).await?;
     write_socket.flush().await?;
 
     Ok(())
 }
 
-async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLock, write_socket :&mut OwnedWriteHalf) -> io::Result<()> {
+async fn check_alerts_for_user(
+    pool: &SqlitePool,
+    user_id: i64,
+    map_lock: &MapLock,
+    write_socket: &mut OwnedWriteHalf,
+) -> io::Result<()> {
     let alerts = match database::get_user_alerts(pool, user_id).await {
         Ok(a) => a,
         Err(e) => {
@@ -200,14 +240,22 @@ async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLo
     let prices = map_lock.read().await;
 
     for alert in alerts.iter() {
-        if let Some(current_price) = prices.get(&alert.symbol) {    
+        if let Some(current_price) = prices.get(&alert.symbol) {
             let triggered = match alert.direction {
                 AlertDirection::Above => *current_price > alert.threshold,
                 AlertDirection::Below => *current_price < alert.threshold,
             };
 
             if triggered {
-                let message = ServerMsg::AlertTriggered { symbol: alert.symbol.clone(), direction: alert.direction, threshold: alert.threshold, current_price: Price { value: *current_price } }.to_wire();
+                let message = ServerMsg::AlertTriggered {
+                    symbol: alert.symbol.clone(),
+                    direction: alert.direction,
+                    threshold: alert.threshold,
+                    current_price: Price {
+                        value: *current_price,
+                    },
+                }
+                .to_wire();
                 write_socket.write_all(message.as_bytes()).await?;
                 write_socket.flush().await?;
             }
@@ -216,13 +264,12 @@ async fn check_alerts_for_user(pool: &SqlitePool, user_id: i64, map_lock: &MapLo
     Ok(())
 }
 
-async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::SqlitePool) {
+async fn handle_client(socket: TcpStream, map_pointer: MapLock, pool: sqlx::SqlitePool) {
     let (read_socket, mut write_socket) = socket.into_split();
 
     let mut buffered_reads = BufReader::new(read_socket).lines();
 
-    let mut user_logged_in : Option<i64> = None;
-
+    let mut user_logged_in: Option<i64> = None;
 
     loop {
         tokio::select! {
@@ -236,7 +283,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     if let Err(e) = prepare_new_alert(&pool, id, &alert, &map_pointer, &mut write_socket).await {
                                         error!("[server-database] Failed to add alert to database! {}", e);
                                     }
-                                },  
+                                },
                                 Some(ClientMsg::RemoveAlert{symbol, direction}) => {
                                     info!("[user: {}] Remove Alert: {}{:?}", id, symbol, direction);
                                     if let Err(e) = database::remove_alert(&pool, id, &symbol, direction).await {
@@ -255,19 +302,19 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     warn!("[user: {}] User already logged-in: {}", id, username);
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
                                         error!("[server] Network error: {}", z);
-                                    }          
+                                    }
                                 },
                                 Some(ClientMsg::RegisterClient{username, password: _}) => {
                                     warn!("[user: {}] User already registered: {}", id, username);
                                     if let Err(z) = client_errors("You are arleady logged-in!", &mut write_socket).await {
                                         error!("[server] Network error: {}", z);
-                                    }   
+                                    }
                                 },
                                 Some(ClientMsg::CheckPrice{symbol}) => {
                                     info!("[user: {}] Check price: {}", id, symbol);
                                     if let Err(z) = check_price(&symbol, &map_pointer, &mut write_socket).await {
                                         error!("[server] Network error: {}", z);
-                                    }   
+                                    }
                                 },
                                 Some(ClientMsg::SellStock{symbol, quantity}) => {
                                     info!("[user: {}] Sell stock: {} {}", id, symbol, quantity);
@@ -276,7 +323,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             error!("[server-database] Database error! {}", e);
                                             if let Err(z) = client_errors(&e, &mut write_socket).await {
                                                 error!("[server] Network error: {}", z);
-                                            }   
+                                            }
                                         }
                                         else {
                                             let message = ServerMsg::StockSold { symbol, quantity }.to_wire();
@@ -287,7 +334,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     }
                                     else if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
                                             error!("[server] Network error: {}", z);
-                                        
+
                                     }
 
                                 },
@@ -298,17 +345,17 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                             error!("[server-database] Database error! {}", e);
                                             if let Err(z) = client_errors(&e, &mut write_socket).await {
                                                 error!("[server] Network error: {}", z);
-                                            }   
+                                            }
                                         }
-                                     
+
                                         let message = ServerMsg::StockBought { symbol, quantity }.to_wire();
                                         if let Err(e) = send_data(message, &mut write_socket).await {
                                             error!("[server] Network error: {}", e);
                                         }
-                                    } 
+                                    }
                                     else if let Err(z) = client_errors("Stock not available!", &mut write_socket).await {
                                             error!("[server] Network error: {}", z);
-                                        
+
                                     }
                                 },
                                 Some(ClientMsg::GetAllClientData) => {
@@ -319,7 +366,7 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                     match tokio::try_join!(stocks_fut, alerts_fut) {
                                         Ok((stocks, alerts)) => {
                                             let message = ServerMsg::AllClientData { stocks, alerts }.to_wire();
-                                           
+
                                             if let Err(e) = send_data(message, &mut write_socket).await {
                                                 error!("[server] Network error: {}", e);
                                             }
@@ -346,12 +393,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                 Some(ClientMsg::LoginClient{username, password}) => {
                                     info!("New log-in request!");
                                     match database::login_user(&pool, &username, &password).await {
-                                        Ok(id) => { 
+                                        Ok(id) => {
                                             user_logged_in = Some(id);
                                             let message = ServerMsg::UserLogged.to_wire();
                                             if let Err(e) = send_data(message, &mut write_socket).await {
                                                 error!("[server] Network error: {}", e);
-                                                break;  
+                                                break;
                                             }
                                         },
                                         Err(e) => {
@@ -365,11 +412,11 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                                 Some(ClientMsg::RegisterClient{username, password}) => {
                                     info!("New register request!");
                                     match database::register_user(&pool, &username, &password).await {
-                                        Ok(_) => { 
+                                        Ok(_) => {
                                             let message = ServerMsg::UserRegistered.to_wire();
                                             if let Err(e) = send_data(message, &mut write_socket).await {
                                                 error!("[server] Network error: {}", e);
-                                                break;  
+                                                break;
                                             }
                                         },
                                         Err(e) => {
@@ -395,10 +442,10 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
                     }
                     Err(e) => {
                         error!("[server] Network error: {}", e);
-                        break; 
+                        break;
                     }
                 }
-            }   
+            }
             _ = tokio::time::sleep(Duration::from_secs(60)) => {
                 info!("[server] Sending alerts to client!");
                 if let Some(uid) = user_logged_in {
@@ -411,17 +458,12 @@ async fn handle_client(socket : TcpStream, map_pointer : MapLock, pool: sqlx::Sq
             }
 
         }
-
     }
-
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
-    tracing_subscriber::fmt()
-        .with_env_filter("info") 
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let db_opts = SqliteConnectOptions::new()
         .filename("database.db")
@@ -433,14 +475,13 @@ async fn main() -> Result<()> {
         .await
         .context("[server-database] Failed to connect to the database!")?;
 
-    
     if let Err(e) = database::init_database(&pool).await {
-       error!("[server-database] Database Init error! {}", e);
+        error!("[server-database] Database Init error! {}", e);
     }
 
     let stock_symbols = read_all_stocks();
 
-    let stock_map : MapLock = Arc::new(RwLock::new(HashMap::new()));
+    let stock_map: MapLock = Arc::new(RwLock::new(HashMap::new()));
 
     let stock_map_clone = stock_map.clone();
     tokio::spawn(async move {
@@ -450,11 +491,10 @@ async fn main() -> Result<()> {
     });
 
     info!("[server] Server runs. Press CTR + C to stop it.");
-    
+
     let listener = TcpListener::bind("127.0.0.1:1234")
         .await
         .context("[server] Failed to bind")?;
-
 
     // Waiting for either new client or closing argument.
     loop {
@@ -477,8 +517,6 @@ async fn main() -> Result<()> {
                 break;
             }
         }
-
     }
     Ok(())
-
-} 
+}

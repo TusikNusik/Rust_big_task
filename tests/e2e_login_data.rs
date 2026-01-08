@@ -4,7 +4,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use rust_huge_project::protocol::{parse_server_msg, ClientMsg, ServerMsg};
+use rust_huge_project::protocol::{ClientMsg, ServerMsg, parse_server_msg};
 
 fn unique_suffix() -> u64 {
     SystemTime::now()
@@ -18,7 +18,7 @@ async fn next_msg(
 ) -> ServerMsg {
     let line = timeout(Duration::from_secs(2), lines.next_line())
         .await
-        .expect("timeout waiting for server")        
+        .expect("timeout waiting for server")
         .expect("failed to read line")
         .expect("server closed connection");
     parse_server_msg(&line).expect("failed to parse server message")
@@ -41,7 +41,10 @@ async fn e2e_login_and_data() {
         username: username.clone(),
         password: password.to_string(),
     };
-    write_half.write_all(register.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(register.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     match next_msg(&mut lines).await {
         ServerMsg::UserRegistered => {}
@@ -52,7 +55,10 @@ async fn e2e_login_and_data() {
         username: username.clone(),
         password: password.to_string(),
     };
-    write_half.write_all(login.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(login.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     match next_msg(&mut lines).await {
         ServerMsg::UserLogged => {}
@@ -60,7 +66,10 @@ async fn e2e_login_and_data() {
     }
 
     let data = ClientMsg::GetAllClientData;
-    write_half.write_all(data.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(data.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     match next_msg(&mut lines).await {
         ServerMsg::AllClientData { stocks, alerts } => {
@@ -69,5 +78,4 @@ async fn e2e_login_and_data() {
         }
         other => panic!("expected AllClientData, got {other:?}"),
     }
-
 }

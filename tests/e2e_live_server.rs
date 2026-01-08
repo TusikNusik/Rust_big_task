@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
-use rust_huge_project::protocol::{parse_server_msg, AlertDirection, ClientMsg, ServerMsg};
+use rust_huge_project::protocol::{AlertDirection, ClientMsg, ServerMsg, parse_server_msg};
 
 fn parse_or_fallback(line: &str) -> Option<ServerMsg> {
     if let Some(msg) = parse_server_msg(line) {
@@ -70,7 +70,10 @@ async fn e2e_live_server_flow() {
         username: "test".into(),
         password: "testtest".into(),
     };
-    write_half.write_all(login.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(login.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     let login_msg = wait_for_msg(&mut lines, "UserLogged", |msg| {
         matches!(msg, ServerMsg::UserLogged | ServerMsg::Error(_))
@@ -81,15 +84,24 @@ async fn e2e_live_server_flow() {
     }
 
     let data = ClientMsg::GetAllClientData;
-    write_half.write_all(data.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(data.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
-    wait_for_msg(&mut lines, "AllClientData", |msg| matches!(msg, ServerMsg::AllClientData { .. })).await;
+    wait_for_msg(&mut lines, "AllClientData", |msg| {
+        matches!(msg, ServerMsg::AllClientData { .. })
+    })
+    .await;
 
     let symbol = "AAPL";
     let price = ClientMsg::CheckPrice {
         symbol: symbol.into(),
     };
-    write_half.write_all(price.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(price.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     let current_price = match wait_for_msg(&mut lines, "PriceChecked", |msg| {
         matches!(msg, ServerMsg::PriceChecked { .. })
@@ -133,7 +145,10 @@ async fn e2e_live_server_flow() {
         symbol: symbol.into(),
         quantity: 1,
     };
-    write_half.write_all(buy.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(buy.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     wait_for_msg(&mut lines, "StockBought", |msg| {
         matches!(msg, ServerMsg::StockBought { .. })
@@ -144,7 +159,10 @@ async fn e2e_live_server_flow() {
         symbol: symbol.into(),
         quantity: 1,
     };
-    write_half.write_all(sell.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(sell.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     wait_for_msg(&mut lines, "StockSold", |msg| {
         matches!(msg, ServerMsg::StockSold { .. })
@@ -152,7 +170,10 @@ async fn e2e_live_server_flow() {
     .await;
 
     let data = ClientMsg::GetAllClientData;
-    write_half.write_all(data.to_wire().as_bytes()).await.unwrap();
+    write_half
+        .write_all(data.to_wire().as_bytes())
+        .await
+        .unwrap();
     write_half.flush().await.unwrap();
     wait_for_msg(&mut lines, "AllClientData (after trades)", |msg| {
         matches!(msg, ServerMsg::AllClientData { .. })

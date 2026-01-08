@@ -137,7 +137,6 @@ fn parse_user_cmd(line: &str) -> Option<ClientMsg> {
         "login" => {
             let username = parts.next()?.to_string();
             let password = parts.next()?.to_string();
-           
 
             Some(ClientMsg::LoginClient { username, password })
         }
@@ -188,14 +187,15 @@ fn handle_server_line(line: &str) -> Option<ClientMsg> {
             );
             None
         }
-        Some(ServerMsg::PriceChecked{symbol, price}) => {
-            println!(
-                "[PRICE INFO] {symbol} price={}",
-                price
-            );
+        Some(ServerMsg::PriceChecked { symbol, price }) => {
+            println!("[PRICE INFO] {symbol} price={}", price);
             None
         }
-        Some(ServerMsg::AlertAdded { symbol, direction, threshold }) => {
+        Some(ServerMsg::AlertAdded {
+            symbol,
+            direction,
+            threshold,
+        }) => {
             println!(
                 "[ALERT ADDED] {symbol} {:?} threshold={}",
                 direction, threshold

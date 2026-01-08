@@ -4,7 +4,7 @@
 ## Serwer
 Serwer asynchronicznie wysyła requesty na stronę yahoo-finance i pobiera z niej aktualne ceny akcji. Serwer automatycznie słucha na `localhost:1234` więc przy uruchamianiu go nie trzeba nic wpisywać. Skróty akcji serwer czerpie z pliku `stocks_small.txt` lub `stocks.txt`, załączyłem `stocks_small.txt`, aby zademonstrować, gdyż przetwarzanie pliku `stocks.txt` zajmuje około 15 minut (aczykolwiek działa).
 
-Serwer korzysta z bazy danych `SQLite`. Do bazy ma dostęp tylko serwer, udostępnia/obsługuje żadania klientów. Serwer w przypadku alertów
+Serwer korzysta z bazy danych `SQLite`. Do bazy ma dostęp tylko serwer, udostępnia/obsługuje żadania klientów.
 ## Baza danych
 Baza danych `SQLite`. Przechowuje informacje o danych, nawet po rozłączeniu serwera.
 
@@ -23,17 +23,13 @@ Wykorzystana funkcjonalność języka Rust:
 * **asynchroniczność**: Serwer korzystaja z featerów biblioteki Tokio, cały projekt jest oparty na tej idei. Nagmienne korzystanie z `future`, aby nie oczekiwać biernie na wynik, wymkorzystanie `select!` do rozpoznania nadchodzącego zdarzenia, `spawn` do tworzenia nowych wątków z puli.
 * **współbieżność**: Na poziomie zapisu do bazy danych oraz dostępu przez czytelników do mapy z cenami akcji.
 * **borrowed types**: Nagminne użycie na poziomie całego projektu.
-* **iteratory
+* **iteratory**: Użycie `map`, `filter`, `collect` oraz iteracji po kolekcjach przy przetwarzaniu list akcji, alertów i danych z bazy.
 
 ## Klient
-Klient łączy się z serwerem po TCP i umożliwia użytkownikowi dodawanie i usuwanie alertów cenowych z poziomu terminala. Po uruchomieniu próbuje połączyć się z serwerem, a następnie czeka na komendy wpisywane przez użytkownika. 
-
+Klient konsolowy łączy się z serwerem po TCP i pozwala użytkownikowi zarządzać alertami oraz portfelem. Umożliwia logowanie i rejestrację, dodawanie/usuwanie alertów, sprawdzanie ceny akcji, kupno i sprzedaż, a także pobieranie danych o alertach i posiadanych pozycjach. Jednocześnie wyświetla komunikaty zwrotne z serwera, w tym powiadomienia o spełnionych alertach.
 ## GUI 
-
+Aplikacja desktopowa zbudowana w `eframe/egui`. Pozwala na łączenie z serwerem, logowanie/rejestrację, zarządzanie alertami, podgląd portfela oraz wysyłanie poleceń BUY/SELL/PRICE. Dla alertów wyświetla okno popup i emituje dźwięk. Wyświetlany jest tylko ostatni popup aby w przypadku wielu na raz użytkownik nie musiał wszystkich usuwać, a informacje o wszystkich innych alertach jest w logu.
 ## Protocol
-Cały sposób komunikacji między klientem a serwerem znajduje się w pliku `protocol.rs`. Plik ten zawiera:
-
-- definicje wiadomości przesyłanych między stronami (`AddAlert`, `RemoveAlert`, `AlertTriggered`, `CheckPrice`, `Error`, ...),
-- funkcje parsujące przychodzące linie tekstu i funkcje zamieniające struktury Rust na komendy tekstowe.
-
-Komunikacja opiera się na prostych komendach tekstowych, z których każda kończy się znakiem nowej linii.
+Prosty protokół tekstowy, oparty o pojedyncze linie zakończone `\n`. Klient wysyła komendy: `ADD`, `DEL`, `LOGIN`, `REGISTER`, `PRICE`, `BUY`, `SELL`, `DATA`. Serwer wysyła komendy: `TRIGGER`, `ALERTADDED`, `ALERTDELETED`, `PRICE`, `BOUGHT`, `SOLD`, `DATA`, `LOGIN`, `REGISTER`, `ERR`.
+## Test
+Przy uruchamianiu testów e2e wymagany jest działający serwer.
